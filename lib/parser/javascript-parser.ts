@@ -1,9 +1,6 @@
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
 import type {
-  CallDef,
-  FunctionDef,
-  ImportDef,
   ParsedFile,
 } from '@/lib/parser/types';
 
@@ -12,10 +9,10 @@ import type {
  * Extracts imports, exports, functions, and call relationships.
  */
 export function parseJavaScript(content: string, filePath: string): ParsedFile {
-  const imports: ImportDef[] = [];
+  const imports: ParsedFile['imports'] = [];
   const exports: string[] = [];
-  const functions: FunctionDef[] = [];
-  const calls: CallDef[] = [];
+  const functions: ParsedFile['functions'] = [];
+  const calls: ParsedFile['calls'] = [];
   const loc = content.split('\n').length;
 
   let ast;
@@ -31,16 +28,17 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
 
   const functionStack: string[] = [];
 
+  // Handle CJS/ESM interop for @babel/traverse
   const traverseFn =
     typeof traverse === 'function'
       ? traverse
       : (traverse as unknown as { default: typeof traverse }).default;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  traverseFn(ast, {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const visitor: any = {
     ImportDeclaration(path: any) {
       const source = path.node.source.value;
-      const specifiers = path.node.specifiers.map((s) => {
+      const specifiers = path.node.specifiers.map((s: any) => {
         if (s.type === 'ImportDefaultSpecifier') return 'default';
         if (s.type === 'ImportNamespaceSpecifier') return '*';
         return s.local.name;
@@ -48,7 +46,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
       imports.push({ source, specifiers });
     },
 
-    ExportNamedDeclaration(path) {
+    ExportNamedDeclaration(path: any) {
       const decl = path.node.declaration;
       if (decl) {
         if (
@@ -71,7 +69,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
       }
     },
 
-    ExportDefaultDeclaration(path) {
+    ExportDefaultDeclaration(path: any) {
       const decl = path.node.declaration;
       if (
         decl.type === 'FunctionDeclaration' ||
@@ -86,10 +84,10 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
     },
 
     FunctionDeclaration: {
-      enter(path) {
+      enter(path: any) {
         const name = path.node.id?.name ?? '<anonymous>';
         const line = path.node.loc?.start.line ?? 0;
-        const params = path.node.params.map((p) => {
+        const params = path.node.params.map((p: any) => {
           if (p.type === 'Identifier') return p.name;
           if (p.type === 'AssignmentPattern' && p.left.type === 'Identifier')
             return p.left.name;
@@ -108,7 +106,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
     },
 
     VariableDeclarator: {
-      enter(path) {
+      enter(path: any) {
         const init = path.node.init;
         if (
           init &&
@@ -118,7 +116,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
           if (path.node.id.type === 'Identifier') {
             const name = path.node.id.name;
             const line = path.node.loc?.start.line ?? 0;
-            const params = init.params.map((p) => {
+            const params = init.params.map((p: any) => {
               if (p.type === 'Identifier') return p.name;
               if (
                 p.type === 'AssignmentPattern' &&
@@ -137,7 +135,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
           }
         }
       },
-      exit(path) {
+      exit(path: any) {
         const init = path.node.init;
         if (
           init &&
@@ -150,7 +148,7 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
       },
     },
 
-    CallExpression(path) {
+    CallExpression(path: any) {
       const caller = functionStack[functionStack.length - 1] ?? '<module>';
       const line = path.node.loc?.start.line ?? 0;
       let callee = '';
@@ -170,7 +168,10 @@ export function parseJavaScript(content: string, filePath: string): ParsedFile {
         calls.push({ caller, callee, line });
       }
     },
-  });
+  };
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  traverseFn(ast, visitor);
 
   return { filePath, imports, exports, functions, calls, loc };
 }

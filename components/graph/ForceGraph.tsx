@@ -27,6 +27,7 @@ export interface ForceGraphProps {
   data: GraphData;
   onNodeClick?: (node: GraphNode) => void;
   onNodeDoubleClick?: (node: GraphNode) => void;
+  onNodeHover?: (node: GraphNode | null) => void;
   hoveredNodeId?: string | null;
   selectedNodeId?: string | null;
   filters?: Set<FileType>;
@@ -66,6 +67,7 @@ export default function ForceGraph({
   data,
   onNodeClick,
   onNodeDoubleClick,
+  onNodeHover,
   hoveredNodeId: externalHoveredId,
   selectedNodeId,
   filters,
@@ -231,17 +233,19 @@ export default function ForceGraph({
 
       const bothVisible = isVisible(s) && isVisible(t2);
 
-      let opacity = 0.15;
-      let lineWidth = 0.5;
+      // Scale opacity by edge weight (more imports = brighter)
+      let opacity = Math.min(0.5, 0.25 + (link.weight || 1) * 0.08);
+      let lineWidth = Math.min(2, 0.8 + (link.weight || 1) * 0.3);
 
       if (hovered) {
         const sId = s.id;
         const tId = t2.id;
         if (connectedSet!.has(sId) && connectedSet!.has(tId) && (sId === hovered || tId === hovered)) {
-          opacity = 0.4;
-          lineWidth = 1.5;
+          opacity = 0.7;
+          lineWidth = 2.5;
         } else {
-          opacity = 0.05;
+          opacity = 0.06;
+          lineWidth = 0.3;
         }
       }
 
@@ -363,7 +367,7 @@ export default function ForceGraph({
       }
 
       // Labels
-      const showLabel = forceShowLabels || k > 1.5 || node.id === hovered || node.id === selectedNodeId;
+      const showLabel = forceShowLabels || k > 0.7 || node.id === hovered || node.id === selectedNodeId;
       if (showLabel && visible) {
         ctx.font = `11px var(--font-mono), 'JetBrains Mono', monospace`;
         ctx.fillStyle = `rgba(228, 228, 239, 0.7)`;
@@ -438,8 +442,12 @@ export default function ForceGraph({
 
     // Drag behavior
     let dragNode: SimNode | null = null;
+    let didDrag = false;
+    let mouseDownPos = { x: 0, y: 0 };
 
     const handleMouseDown = (e: MouseEvent) => {
+      mouseDownPos = { x: e.offsetX, y: e.offsetY };
+      didDrag = false;
       const node = hitTest(e.offsetX, e.offsetY);
       if (node) {
         dragNode = node;
@@ -453,6 +461,9 @@ export default function ForceGraph({
       mouseRef.current = { x: e.offsetX, y: e.offsetY };
 
       if (dragNode) {
+        const dx = e.offsetX - mouseDownPos.x;
+        const dy = e.offsetY - mouseDownPos.y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true;
         const t = transformRef.current;
         dragNode.fx = (e.offsetX - t.x) / t.k;
         dragNode.fy = (e.offsetY - t.y) / t.k;
@@ -464,7 +475,10 @@ export default function ForceGraph({
       if (newId !== hoveredRef.current) {
         hoveredRef.current = newId;
         setInternalHovered(newId);
+        if (onNodeHover) onNodeHover(node ?? null);
       }
+      // Change cursor
+      canvas.style.cursor = node ? 'pointer' : 'grab';
     };
 
     const handleMouseUp = () => {
@@ -477,6 +491,7 @@ export default function ForceGraph({
     };
 
     const handleClick = (e: MouseEvent) => {
+      if (didDrag) return; // Don't fire click after drag
       const node = hitTest(e.offsetX, e.offsetY);
       if (node && onNodeClick) onNodeClick(node);
     };

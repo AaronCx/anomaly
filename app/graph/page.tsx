@@ -257,6 +257,7 @@ function GraphPageInner() {
         data={graphData}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
+        onNodeHover={setHoveredNode}
         selectedNodeId={selectedNode?.id}
         filters={activeFilters}
         searchHighlight={highlightedNodeId}

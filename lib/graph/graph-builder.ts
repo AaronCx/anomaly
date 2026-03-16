@@ -217,10 +217,35 @@ export function buildGraph(files: Map<string, string>): GraphData {
     }
   }
 
+  // Build function call edges (cross-file calls)
+  const callEdgeMap = new Map<string, number>();
+  for (const [filePath, parsed] of parsedFiles) {
+    for (const call of parsed.calls) {
+      // Check if callee matches an exported function in another file
+      for (const [otherPath, otherParsed] of parsedFiles) {
+        if (otherPath === filePath) continue;
+        const isExported = otherParsed.exports.includes(call.callee) ||
+          otherParsed.functions.some((f) => f.name === call.callee && f.isExported);
+        if (isExported) {
+          const callKey = `${filePath}=>${otherPath}`;
+          callEdgeMap.set(callKey, (callEdgeMap.get(callKey) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
   const edges: GraphEdge[] = [];
   for (const [key, weight] of edgeMap) {
     const [source, target] = key.split('->');
-    edges.push({ source, target, weight });
+    edges.push({ source, target, weight, type: 'import' });
+  }
+  for (const [key, weight] of callEdgeMap) {
+    const [source, target] = key.split('=>');
+    // Only add if not already an import edge (avoid duplicates)
+    const hasImportEdge = edgeMap.has(`${source}->${target}`);
+    if (!hasImportEdge) {
+      edges.push({ source, target, weight, type: 'call' });
+    }
   }
 
   // Detect clusters

@@ -21,6 +21,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   source: SimNode | string;
   target: SimNode | string;
   weight: number;
+  type?: string;
 }
 
 export interface ForceGraphProps {
@@ -124,6 +125,7 @@ export default function ForceGraph({
         source: e.source,
         target: e.target,
         weight: e.weight,
+        type: e.type,
       }));
     linksRef.current = links;
     clustersRef.current = data.clusters;
@@ -150,8 +152,17 @@ export default function ForceGraph({
       .force('x', d3.forceX<SimNode>(width / 2).strength(0.02))
       .force('y', d3.forceY<SimNode>(height / 2).strength(0.02))
       .alphaDecay(PHYSICS.alphaDecay)
+      .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
-      .on('tick', () => {});
+      .on('tick', () => {
+        // Gentle random perturbation to keep the graph feeling alive
+        for (const node of nodes) {
+          if (!node.fx && !node.fy) {
+            node.vx! += (Math.random() - 0.5) * 0.15;
+            node.vy! += (Math.random() - 0.5) * 0.15;
+          }
+        }
+      });
 
     simRef.current = sim;
   }, [data]);
@@ -258,8 +269,12 @@ export default function ForceGraph({
         }
       }
 
-      if (!bothVisible) {
-        // Dashed for edges to hidden nodes
+      const isCallEdge = (link as SimLink & { type?: string }).type === 'call';
+
+      if (isCallEdge) {
+        // Function call edges: dashed, amber colored
+        ctx.setLineDash([6, 4]);
+      } else if (!bothVisible) {
         ctx.setLineDash([4, 4]);
         opacity *= 0.3;
       } else {
@@ -281,7 +296,9 @@ export default function ForceGraph({
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
-      ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+      ctx.strokeStyle = isCallEdge
+        ? `rgba(251, 191, 36, ${opacity})`   // Amber for function calls
+        : `rgba(255, 255, 255, ${opacity})`; // White for imports
       ctx.lineWidth = lineWidth;
       ctx.stroke();
 

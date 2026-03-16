@@ -31,9 +31,10 @@ export const PHYSICS = {
   charge: -150,
   linkDistance: 80,
   collisionPadding: 5,
-  alphaDecay: 0.03,    // Faster cooldown — graph settles in ~3 seconds
-  velocityDecay: 0.5,  // More damping — nodes don't drift as much
-  centerStrength: 0.05,
+  alphaDecay: 0.005,   // Very slow cooldown — graph breathes and floats
+  alphaMin: 0.01,      // Never fully stops — keeps gentle movement
+  velocityDecay: 0.55, // Moderate damping — nodes drift gently
+  centerStrength: 0.03,
 } as const;
 
 /* ── Node sizing ──────────────────────────────────────── */

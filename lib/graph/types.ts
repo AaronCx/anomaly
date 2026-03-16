@@ -18,10 +18,13 @@ export interface GraphNode {
   radius?: number;
 }
 
+export type EdgeType = 'import' | 'call';
+
 export interface GraphEdge {
   source: string;
   target: string;
   weight: number;
+  type: EdgeType;
 }
 
 export interface GraphData {

@@ -10,6 +10,7 @@ import SearchOverlay from '@/components/graph/SearchOverlay';
 import FilterBar from '@/components/graph/FilterBar';
 import GraphControls from '@/components/graph/GraphControls';
 import Minimap from '@/components/graph/Minimap';
+import Legend from '@/components/graph/Legend';
 import { parseFile } from '@/lib/parser';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import type { ParsedFile } from '@/lib/parser/types';
@@ -52,7 +53,7 @@ function buildGraph(parsed: ParsedFile[]): GraphData {
 
   const edges = Array.from(edgeMap.entries()).map(([key, weight]) => {
     const [source, target] = key.split('|');
-    return { source, target, weight };
+    return { source, target, weight, type: 'import' as const };
   });
 
   // Build clusters by directory
@@ -314,6 +315,9 @@ function GraphPageInner() {
         onNavigate={() => {}}
         visible={showMinimap}
       />
+
+      {/* Legend */}
+      <Legend />
 
       {/* Graph controls */}
       <GraphControls

@@ -147,6 +147,9 @@ export default function ForceGraph({
 
   /* ── Canvas rendering loop ───────────────────────────── */
 
+  const drawRef = useRef<() => void>(() => {});
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- draw function stored in ref for animation loop
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -372,8 +375,9 @@ export default function ForceGraph({
 
     ctx.restore();
 
-    animFrameRef.current = requestAnimationFrame(draw);
+    animFrameRef.current = requestAnimationFrame(drawRef.current);
   }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels]);
+  useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */
 

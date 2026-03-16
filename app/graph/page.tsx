@@ -238,6 +238,7 @@ function GraphPageInner() {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-4 bg-[var(--color-bg)]">
         <p className="text-red-400">{error}</p>
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a href="/" className="text-sm text-[var(--color-accent)] underline underline-offset-2">
           Back to home
         </a>

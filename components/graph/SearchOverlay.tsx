@@ -123,39 +123,35 @@ export default function SearchOverlay({ data, open, onClose, onSelect }: SearchO
   useEffect(() => {
     if (open) {
       inputRef.current?.focus();
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting state on open
       setQuery('');
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting state on open
       setActiveIdx(0);
     }
   }, [open]);
 
-  const handleSelect = useCallback(
-    (result: SearchResult) => {
-      onSelect(result.nodeId);
-      onClose();
-    },
-    [onSelect, onClose],
-  );
+  const handleSelect = (result: SearchResult) => {
+    onSelect(result.nodeId);
+    onClose();
+  };
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-        return;
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveIdx((i) => Math.min(i + 1, flatResults.length - 1));
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveIdx((i) => Math.max(i - 1, 0));
-      }
-      if (e.key === 'Enter' && flatResults[activeIdx]) {
-        handleSelect(flatResults[activeIdx]);
-      }
-    },
-    [flatResults, activeIdx, handleSelect, onClose],
-  );
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, flatResults.length - 1));
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    }
+    if (e.key === 'Enter' && flatResults[activeIdx]) {
+      handleSelect(flatResults[activeIdx]);
+    }
+  };
 
   if (!open) return null;
 

@@ -21,6 +21,7 @@ export function useAnalysis(analysisId: string): UseAnalysisReturn {
   const poll = useCallback(async () => {
     try {
       const status = await getAnalysisStatus(analysisId)
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- callback-based polling pattern
       setProgress(status)
 
       if (status.status === 'complete') {
@@ -50,6 +51,7 @@ export function useAnalysis(analysisId: string): UseAnalysisReturn {
   }, [analysisId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- poll() is an async callback that sets state on resolution
     poll()
     intervalRef.current = setInterval(poll, 2000)
     return () => {

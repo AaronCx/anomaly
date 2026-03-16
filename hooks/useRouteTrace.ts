@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { RouteTrace } from '@/lib/types'
 import { traceRoute } from '@/lib/api'
 
@@ -18,34 +18,27 @@ export function useRouteTrace(
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!routePath) {
-      setTrace(null)
-      return
-    }
-
-    let cancelled = false
+  const fetchTrace = useCallback(async (path: string) => {
     setIsLoading(true)
     setError(null)
-
-    traceRoute(analysisId, routePath)
-      .then((result) => {
-        if (!cancelled) {
-          setTrace(result)
-          setIsLoading(false)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to trace route')
-          setIsLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
+    try {
+      const result = await traceRoute(analysisId, path)
+      setTrace(result)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trace route')
+    } finally {
+      setIsLoading(false)
     }
-  }, [analysisId, routePath])
+  }, [analysisId])
 
-  return { trace, isLoading, error }
+  useEffect(() => {
+    if (!routePath) return
+    fetchTrace(routePath)
+  }, [routePath, fetchTrace])
+
+  // When routePath becomes null, trace is stale but not reset synchronously
+  // Consumer should check routePath to know if trace is relevant
+  const effectiveTrace = routePath ? trace : null
+
+  return { trace: effectiveTrace, isLoading, error }
 }

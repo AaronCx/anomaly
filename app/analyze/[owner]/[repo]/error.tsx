@@ -1,5 +1,7 @@
 'use client'
 
+import Link from 'next/link'
+
 export default function AnalysisError({
   error,
   reset,
@@ -28,13 +30,13 @@ export default function AnalysisError({
           >
             Try Again
           </button>
-          <a
+          <Link
             href="/"
             className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             style={{ background: '#1e1e2e', color: '#e2e8f0' }}
           >
             Go Home
-          </a>
+          </Link>
         </div>
       </div>
     </div>

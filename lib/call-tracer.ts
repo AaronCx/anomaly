@@ -114,7 +114,7 @@ function buildImportMap(
   parsedFiles: Map<string, ParsedFile>
 ): ImportResolution[] {
   const resolutions: ImportResolution[] = []
-  const knownFiles = new Set(parsedFiles.keys())
+  const _knownFiles = new Set(parsedFiles.keys())
 
   for (const imp of parsed.imports) {
     // Skip external packages

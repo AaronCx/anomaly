@@ -432,33 +432,29 @@ export default function ForceGraph({
     const sel = d3.select(canvas);
 
     let dragNode: SimNode | null = null;
-    let pointerDownOnNode = false;
-
-    // ── Register our pointerdown FIRST (before d3.zoom) ──
-    // This fires before d3.zoom's pointerdown handler
-    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-      const node = hitTest(e.offsetX, e.offsetY);
-      if (node) {
-        pointerDownOnNode = true;
-        dragNode = node;
-        dragNode.fx = dragNode.x;
-        dragNode.fy = dragNode.y;
-        simRef.current?.alphaTarget(0.1).restart();
-      } else {
-        pointerDownOnNode = false;
-      }
-    });
 
     // ── d3.zoom for pan + scroll zoom ──
     const zoomBehavior = d3
       .zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 10])
       .filter((event: Event) => {
-        // Block zoom/pan when we're starting a node interaction
-        if (pointerDownOnNode && (event.type === 'mousedown' || event.type === 'pointerdown')) {
-          return false;
+        // Always allow wheel zoom
+        if (event.type === 'wheel') return true;
+        // Block dblclick zoom
+        if (event.type === 'dblclick') return false;
+        // Block zoom/pan on mousedown/pointerdown if over a node
+        if (event.type === 'mousedown' || event.type === 'pointerdown') {
+          const me = event as PointerEvent;
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const x = me.clientX - rect.left;
+            const y = me.clientY - rect.top;
+            const node = hitTest(x, y);
+            if (node) return false; // Block d3.zoom for this event
+          }
         }
-        return event.type !== 'dblclick'; // We handle dblclick
+        return true;
       })
       .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         transformRef.current = event.transform;
@@ -498,7 +494,7 @@ export default function ForceGraph({
         simRef.current?.alphaTarget(0);
         if (onNodeClick) onNodeClick(clickedNode);
       }
-      pointerDownOnNode = false;
+      // Reset after handling node click
     });
 
     const handleClick = () => {

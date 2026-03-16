@@ -107,18 +107,17 @@ export default function ForceGraph({
     const width = canvas.width / (window.devicePixelRatio || 1);
     const height = canvas.height / (window.devicePixelRatio || 1);
 
-    // Scale physics by graph size AND edge density
+    // Scale physics to produce consistent visual density across all graph sizes
     const nodeCount = data.nodes.length;
-    // Only count import+call edges for density (export edges are visual-only)
     const physicsEdgeCount = data.edges.filter((e) => e.type !== 'export').length;
     const edgeDensity = nodeCount > 0 ? physicsEdgeCount / nodeCount : 0;
-    // More edges per node = need more repulsion and weaker links
-    const densityFactor = Math.max(1, 1 + (edgeDensity - 2) * 0.25); // baseline at 2 edges/node
-    const sizeFactor = Math.max(1, 1 + Math.log10(Math.max(nodeCount / 40, 1)) * 0.3);
-    const chargeStrength = PHYSICS.charge * sizeFactor * densityFactor;
-    const linkDist = PHYSICS.linkDistance * sizeFactor * Math.max(1, densityFactor * 0.7);
-    const linkStrength = 0.25 / densityFactor; // Weaker links when dense
-    const collisionPad = PHYSICS.collisionPadding + (sizeFactor - 1) * 2 + (densityFactor - 1) * 3;
+
+    // Strong short-range repulsion that scales with graph complexity
+    // This is the key to preventing bunching — nodes MUST have personal space
+    const chargeStrength = -250 - (edgeDensity * 40) - (Math.sqrt(nodeCount) * 8);
+    const linkDist = 100 + (edgeDensity * 15);
+    const linkStrength = Math.min(0.15, 0.3 / Math.max(edgeDensity, 1)); // Much weaker links for dense graphs
+    const collisionPad = 12 + edgeDensity * 3; // Generous collision padding
 
     // Build nodes
     const spread = 0.5;
@@ -167,14 +166,14 @@ export default function ForceGraph({
           .distance(linkDist)
           .strength(linkStrength),
       )
-      .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength))
-      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength).distanceMax(400))
+      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.5))
       .force(
         'collision',
-        d3.forceCollide<SimNode>().radius((d) => d.radius + collisionPad),
+        d3.forceCollide<SimNode>().radius((d) => d.radius + collisionPad).strength(1),
       )
-      .force('x', d3.forceX<SimNode>(width / 2).strength(0.03))
-      .force('y', d3.forceY<SimNode>(height / 2).strength(0.03))
+      .force('x', d3.forceX<SimNode>(width / 2).strength(0.01))
+      .force('y', d3.forceY<SimNode>(height / 2).strength(0.01))
       .alphaDecay(PHYSICS.alphaDecay)
       .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
@@ -626,7 +625,7 @@ export default function ForceGraph({
 
     // Adaptive density-based zoom — target consistent visual spacing regardless of graph size
     let hasFitted = false;
-    const TARGET_SCREEN_SPACING = 55; // px between nearest neighbors on screen (calibrated to LastGate look)
+    const TARGET_SCREEN_SPACING = 45; // px between nearest neighbors on screen
 
     const fitCheck = setInterval(() => {
       if (hasFitted) return;
@@ -657,18 +656,31 @@ export default function ForceGraph({
       }
       const avgNearestDist = count > 0 ? totalNearestDist / count : 100;
 
-      // Calculate zoom to make avgNearestDist appear as TARGET_SCREEN_SPACING on screen
-      const scale = Math.min(Math.max(TARGET_SCREEN_SPACING / avgNearestDist, 0.15), 2.0);
-
-      // Center on the graph centroid
-      let cx = 0, cy = 0;
-      for (const n of nodes) { cx += n.x; cy += n.y; }
-      cx /= nodes.length;
-      cy /= nodes.length;
+      // Also compute bounding box to ensure all nodes are visible
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y);
+      }
 
       const dpr = window.devicePixelRatio || 1;
       const w = canvas.width / dpr;
       const h = canvas.height / dpr;
+      const padding = 80;
+      const gw = maxX - minX;
+      const gh = maxY - minY;
+
+      // Two zoom candidates: density-based and fit-all-nodes
+      const densityScale = TARGET_SCREEN_SPACING / avgNearestDist;
+      const fitScale = gw > 0 && gh > 0
+        ? Math.min((w - padding * 2) / gw, (h - padding * 2) / gh)
+        : 1;
+
+      // Use the SMALLER of the two — ensures all nodes visible AND good density
+      const scale = Math.min(Math.max(Math.min(densityScale, fitScale), 0.1), 1.8);
+
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
       const tx = w / 2 - cx * scale;
       const ty = h / 2 - cy * scale;
 

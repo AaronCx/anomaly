@@ -489,18 +489,17 @@ export default function ForceGraph({
       canvas.style.cursor = node ? 'pointer' : 'grab';
     };
 
-    const handleMouseUp = () => {
+    canvas.addEventListener('pointerup', () => {
       if (dragNode) {
         const clickedNode = dragNode;
         dragNode.fx = null;
         dragNode.fy = null;
         dragNode = null;
         simRef.current?.alphaTarget(0);
-        // Always fire click for the dragged/clicked node
         if (onNodeClick) onNodeClick(clickedNode);
-        return;
       }
-    };
+      pointerDownOnNode = false;
+    });
 
     const handleClick = () => {
       // Node clicks handled by mouseUp via pointerdown/dragNode tracking
@@ -537,7 +536,7 @@ export default function ForceGraph({
 
     // mousedown handled by pointerdown above
     canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
+    // mouseup handled by pointerup above
     canvas.addEventListener('click', handleClick);
     canvas.addEventListener('dblclick', handleDblClick);
     canvas.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -551,7 +550,7 @@ export default function ForceGraph({
       window.removeEventListener('resize', resizeCanvas);
       // pointerdown cleaned up separately
       canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
+      // pointerup cleaned up by GC (canvas unmounts)
       canvas.removeEventListener('click', handleClick);
       canvas.removeEventListener('dblclick', handleDblClick);
       canvas.removeEventListener('touchstart', handleTouchStart);

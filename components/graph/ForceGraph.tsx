@@ -430,61 +430,37 @@ export default function ForceGraph({
     buildSimulation();
 
     const sel = d3.select(canvas);
-    let didDrag = false;
+
+    // Track if zoom/pan moved the canvas (to distinguish pan from click)
+    let zoomMoved = false;
+    let dragNode: SimNode | null = null;
 
     // ── d3.zoom for pan + scroll zoom ──
     const zoomBehavior = d3
       .zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 10])
+      .on('start', () => { zoomMoved = false; })
       .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         transformRef.current = event.transform;
+        if (event.sourceEvent) zoomMoved = true;
       });
 
     sel.call(zoomBehavior);
     sel.on('dblclick.zoom', null); // We handle dblclick ourselves
 
-    // ── d3.drag for node dragging (integrates with zoom automatically) ──
-    const dragBehavior = d3
-      .drag<HTMLCanvasElement, unknown>()
-      .subject((event: d3.D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
-        const node = hitTest(event.sourceEvent.offsetX, event.sourceEvent.offsetY);
-        if (!node) return null as unknown as SimNode;
-        // Return the node as the drag subject — d3 will suppress zoom for this gesture
-        return node;
-      })
-      .on('start', (event: d3.D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
-        if (!event.subject) return;
-        didDrag = false;
-        if (!event.active) simRef.current?.alphaTarget(0.3).restart();
-        const node = event.subject as SimNode;
-        node.fx = node.x;
-        node.fy = node.y;
-      })
-      .on('drag', (event: d3.D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
-        if (!event.subject) return;
-        didDrag = true;
-        const node = event.subject as SimNode;
-        const t = transformRef.current;
-        node.fx = (event.sourceEvent.offsetX - t.x) / t.k;
-        node.fy = (event.sourceEvent.offsetY - t.y) / t.k;
-      })
-      .on('end', (event: d3.D3DragEvent<HTMLCanvasElement, unknown, SimNode>) => {
-        if (!event.subject) return;
-        if (!event.active) simRef.current?.alphaTarget(0);
-        const node = event.subject as SimNode;
-        node.fx = null;
-        node.fy = null;
-        // If it wasn't a real drag (no movement), treat as a click
-        if (!didDrag && onNodeClick) {
-          onNodeClick(node);
-        }
-      });
-
-    sel.call(dragBehavior as unknown as (sel: d3.Selection<HTMLCanvasElement, unknown, null, undefined>) => void);
-
-    // ── Hover tracking (mousemove only, no conflict with zoom/drag) ──
+    // ── Mouse handlers ──
     const handleMouseMove = (e: MouseEvent) => {
       mouseRef.current = { x: e.offsetX, y: e.offsetY };
+
+      // If dragging a node, update its position
+      if (dragNode) {
+        const t = transformRef.current;
+        dragNode.fx = (e.offsetX - t.x) / t.k;
+        dragNode.fy = (e.offsetY - t.y) / t.k;
+        return;
+      }
+
+      // Hover detection
       const node = hitTest(e.offsetX, e.offsetY);
       const newId = node?.id ?? null;
       if (newId !== hoveredRef.current) {
@@ -495,12 +471,44 @@ export default function ForceGraph({
       canvas.style.cursor = node ? 'pointer' : 'grab';
     };
 
-    // ── Click on empty space (deselect) ──
-    const handleClick = (e: MouseEvent) => {
-      // Node clicks are handled by d3.drag end handler
-      // This only handles clicks on empty space
+    const handleMouseDown = (e: MouseEvent) => {
       const node = hitTest(e.offsetX, e.offsetY);
-      if (!node && onNodeClick) onNodeClick(null as unknown as GraphNode);
+      if (node) {
+        // Start dragging this node — prevent d3.zoom from panning
+        e.stopPropagation();
+        dragNode = node;
+        dragNode.fx = dragNode.x;
+        dragNode.fy = dragNode.y;
+        simRef.current?.alphaTarget(0.3).restart();
+        zoomMoved = true; // Prevent click handler from firing for zoom
+      }
+      zoomMoved = false;
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (dragNode) {
+        const wasDrag = dragNode.fx !== dragNode.x || dragNode.fy !== dragNode.y;
+        const clickedNode = dragNode;
+        dragNode.fx = null;
+        dragNode.fy = null;
+        dragNode = null;
+        simRef.current?.alphaTarget(0);
+
+        // If mouse barely moved, treat as click
+        if (!wasDrag && onNodeClick) {
+          onNodeClick(clickedNode);
+        }
+        return;
+      }
+    };
+
+    const handleClick = (e: MouseEvent) => {
+      // Only fires when NOT on a node (mousedown on node stops propagation)
+      if (zoomMoved) return; // Was a pan gesture, not a click
+      const node = hitTest(e.offsetX, e.offsetY);
+      if (node && onNodeClick) {
+        onNodeClick(node);
+      }
     };
 
     const handleDblClick = (e: MouseEvent) => {
@@ -532,7 +540,9 @@ export default function ForceGraph({
       touchStartNode = null;
     };
 
+    canvas.addEventListener('mousedown', handleMouseDown, true); // Capture phase to beat d3.zoom
     canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('click', handleClick);
     canvas.addEventListener('dblclick', handleDblClick);
     canvas.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -544,7 +554,9 @@ export default function ForceGraph({
 
     return () => {
       window.removeEventListener('resize', resizeCanvas);
+      canvas.removeEventListener('mousedown', handleMouseDown, true);
       canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('click', handleClick);
       canvas.removeEventListener('dblclick', handleDblClick);
       canvas.removeEventListener('touchstart', handleTouchStart);

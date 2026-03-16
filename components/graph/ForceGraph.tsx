@@ -586,6 +586,26 @@ export default function ForceGraph({
     );
   }, [searchHighlight]);
 
+  // Window-level click handler that bypasses d3.zoom's event capture
+  useEffect(() => {
+    const handleWindowClick = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      // Only handle clicks on our canvas
+      if (e.target !== canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const node = hitTest(x, y);
+      if (node && onNodeClick) {
+        onNodeClick(node);
+      }
+    };
+
+    window.addEventListener('click', handleWindowClick);
+    return () => window.removeEventListener('click', handleWindowClick);
+  }, [hitTest, onNodeClick]);
+
   return (
     <canvas
       ref={canvasRef}

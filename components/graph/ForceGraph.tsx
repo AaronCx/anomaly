@@ -15,6 +15,7 @@ interface SimNode extends GraphNode {
   radius: number;
   fx?: number | null;
   fy?: number | null;
+  _phase: number;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -106,14 +107,23 @@ export default function ForceGraph({
     const width = canvas.width / (window.devicePixelRatio || 1);
     const height = canvas.height / (window.devicePixelRatio || 1);
 
-    // Build nodes
-    const nodes: SimNode[] = data.nodes.map((n) => ({
+    // Scale physics by graph size — larger graphs need more spacing
+    const nodeCount = data.nodes.length;
+    const scaleFactor = Math.max(1, Math.sqrt(nodeCount / 40)); // 40 nodes = baseline
+    const chargeStrength = PHYSICS.charge * scaleFactor;
+    const linkDist = PHYSICS.linkDistance * scaleFactor;
+    const collisionPad = PHYSICS.collisionPadding + (scaleFactor - 1) * 3;
+
+    // Build nodes — spread initial positions wider for large graphs
+    const spread = Math.min(1, 0.3 + scaleFactor * 0.2);
+    const nodes: SimNode[] = data.nodes.map((n, i) => ({
       ...n,
-      x: n.x ?? width / 2 + (Math.random() - 0.5) * width * 0.5,
-      y: n.y ?? height / 2 + (Math.random() - 0.5) * height * 0.5,
+      x: n.x ?? width / 2 + (Math.random() - 0.5) * width * spread,
+      y: n.y ?? height / 2 + (Math.random() - 0.5) * height * spread,
       vx: 0,
       vy: 0,
       radius: nodeRadius(n.loc),
+      _phase: i * 2.39996, // Golden angle offset for unique drift per node
     }));
     nodesRef.current = nodes;
 
@@ -133,6 +143,9 @@ export default function ForceGraph({
     // Stop previous simulation
     if (simRef.current) simRef.current.stop();
 
+    // Tick counter for smooth sine-wave drift
+    let tickCount = 0;
+
     const sim = d3
       .forceSimulation<SimNode>(nodes)
       .force(
@@ -140,36 +153,40 @@ export default function ForceGraph({
         d3
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
-          .distance(PHYSICS.linkDistance)
-          .strength(0.3),
+          .distance(linkDist)
+          .strength(0.3 / scaleFactor), // Weaker links for larger graphs
       )
-      .force('charge', d3.forceManyBody<SimNode>().strength(PHYSICS.charge))
+      .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force(
         'collision',
-        d3.forceCollide<SimNode>().radius((d) => d.radius + PHYSICS.collisionPadding),
+        d3.forceCollide<SimNode>().radius((d) => d.radius + collisionPad),
       )
-      .force('x', d3.forceX<SimNode>(width / 2).strength(0.02))
-      .force('y', d3.forceY<SimNode>(height / 2).strength(0.02))
+      .force('x', d3.forceX<SimNode>(width / 2).strength(0.015 / scaleFactor))
+      .force('y', d3.forceY<SimNode>(height / 2).strength(0.015 / scaleFactor))
       .alphaDecay(PHYSICS.alphaDecay)
       .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
       .on('tick', () => {
-        // Gentle random perturbation — gives nodes a breathing, floating feel
+        tickCount++;
+        // Smooth sine-wave drift — each node orbits gently at its own phase
+        // This creates a floating feel, not vibration
+        const t = tickCount * 0.008; // Slow time progression
         for (const node of nodes) {
           if (!node.fx && !node.fy) {
-            node.vx! += (Math.random() - 0.5) * 0.4;
-            node.vy! += (Math.random() - 0.5) * 0.4;
+            const phase = (node as SimNode & { _phase: number })._phase;
+            node.vx! += Math.sin(t + phase) * 0.04;
+            node.vy! += Math.cos(t + phase * 1.3) * 0.04;
           }
         }
       });
 
-    // Periodically reheat the simulation so it never fully stops
+    // Gently reheat so the drift never fully stops
     const reheatInterval = setInterval(() => {
-      if (sim.alpha() < 0.05) {
-        sim.alpha(0.05).restart();
+      if (sim.alpha() < 0.03) {
+        sim.alpha(0.03).restart();
       }
-    }, 3000);
+    }, 5000);
 
     simRef.current = sim;
 

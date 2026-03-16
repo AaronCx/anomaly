@@ -155,16 +155,28 @@ export default function ForceGraph({
       .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
       .on('tick', () => {
-        // Gentle random perturbation to keep the graph feeling alive
+        // Gentle random perturbation — gives nodes a breathing, floating feel
         for (const node of nodes) {
           if (!node.fx && !node.fy) {
-            node.vx! += (Math.random() - 0.5) * 0.15;
-            node.vy! += (Math.random() - 0.5) * 0.15;
+            node.vx! += (Math.random() - 0.5) * 0.4;
+            node.vy! += (Math.random() - 0.5) * 0.4;
           }
         }
       });
 
+    // Periodically reheat the simulation so it never fully stops
+    const reheatInterval = setInterval(() => {
+      if (sim.alpha() < 0.05) {
+        sim.alpha(0.05).restart();
+      }
+    }, 3000);
+
     simRef.current = sim;
+
+    return () => {
+      clearInterval(reheatInterval);
+      sim.stop();
+    };
   }, [data]);
 
   /* ── Canvas rendering loop ───────────────────────────── */

@@ -624,8 +624,10 @@ export default function ForceGraph({
 
     animFrameRef.current = requestAnimationFrame(draw);
 
-    // Auto fit-to-view after simulation settles
+    // Adaptive density-based zoom — target consistent visual spacing regardless of graph size
     let hasFitted = false;
+    const TARGET_SCREEN_SPACING = 55; // px between nearest neighbors on screen (calibrated to LastGate look)
+
     const fitCheck = setInterval(() => {
       if (hasFitted) return;
       const sim = simRef.current;
@@ -634,28 +636,44 @@ export default function ForceGraph({
       clearInterval(fitCheck);
 
       const nodes = nodesRef.current;
-      if (nodes.length === 0) return;
+      if (nodes.length < 2) return;
 
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const n of nodes) {
-        minX = Math.min(minX, n.x - n.radius);
-        minY = Math.min(minY, n.y - n.radius);
-        maxX = Math.max(maxX, n.x + n.radius);
-        maxY = Math.max(maxY, n.y + n.radius);
+      // Compute average nearest-neighbor distance in graph space
+      let totalNearestDist = 0;
+      let count = 0;
+      for (let i = 0; i < nodes.length; i++) {
+        let nearest = Infinity;
+        for (let j = 0; j < nodes.length; j++) {
+          if (i === j) continue;
+          const dx = nodes[i].x - nodes[j].x;
+          const dy = nodes[i].y - nodes[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < nearest) nearest = dist;
+        }
+        if (nearest < Infinity) {
+          totalNearestDist += nearest;
+          count++;
+        }
       }
-      const gw = maxX - minX;
-      const gh = maxY - minY;
-      if (gw > 0 && gh > 0) {
-        const dpr = window.devicePixelRatio || 1;
-        const w = canvas.width / dpr;
-        const h = canvas.height / dpr;
-        const padding = 80;
-        const scale = Math.min((w - padding * 2) / gw, (h - padding * 2) / gh, 1.5);
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        transformRef.current = d3.zoomIdentity.translate(w / 2 - cx * scale, h / 2 - cy * scale).scale(scale);
-        sel.call(zoomBehavior.transform, transformRef.current);
-      }
+      const avgNearestDist = count > 0 ? totalNearestDist / count : 100;
+
+      // Calculate zoom to make avgNearestDist appear as TARGET_SCREEN_SPACING on screen
+      const scale = Math.min(Math.max(TARGET_SCREEN_SPACING / avgNearestDist, 0.15), 2.0);
+
+      // Center on the graph centroid
+      let cx = 0, cy = 0;
+      for (const n of nodes) { cx += n.x; cy += n.y; }
+      cx /= nodes.length;
+      cy /= nodes.length;
+
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.width / dpr;
+      const h = canvas.height / dpr;
+      const tx = w / 2 - cx * scale;
+      const ty = h / 2 - cy * scale;
+
+      transformRef.current = d3.zoomIdentity.translate(tx, ty).scale(scale);
+      sel.call(zoomBehavior.transform, transformRef.current);
     }, 300);
 
     return () => {

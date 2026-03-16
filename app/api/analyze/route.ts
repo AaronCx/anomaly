@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server'
 import type { AnalyzeRequest, AnalyzeResponse, AnalysisResult } from '@/lib/types'
 import { parseRepoUrl, generateId } from '@/lib/utils'
-import { setAnalysis, updateAnalysisStatus } from '@/lib/store'
+import { getAnalysis, setAnalysis, updateAnalysisStatus } from '@/lib/store'
 import { getRepoInfo, fetchRepoTree, fetchFilesInBatches } from '@/lib/github'
 import { parseFile, type ParsedFile } from '@/lib/parser'
 import { detectRoutes } from '@/lib/route-detector'
 import { buildModuleGraph } from '@/lib/module-analyzer'
+
+// Allow up to 60s for analysis on Vercel hobby tier
+export const maxDuration = 60
 
 export async function POST(request: Request) {
   try {
@@ -47,15 +50,19 @@ export async function POST(request: Request) {
     setAnalysis(id, initial)
     updateAnalysisStatus(id, 'cloning', 0, 'Fetching repository metadata...')
 
-    // Run analysis synchronously (within Vercel's time limits)
-    // We use a fire-and-forget pattern but await as much as we can
-    runAnalysis(id, owner, repo).catch((err) => {
+    // Run analysis synchronously — must complete before response on Vercel serverless
+    // (Vercel kills background work after response is sent)
+    try {
+      await runAnalysis(id, owner, repo)
+    } catch (err) {
       console.error(`Analysis ${id} failed:`, err)
       updateAnalysisStatus(id, 'error', 0, String(err))
-    })
+    }
 
-    const response: AnalyzeResponse = { id, owner, repo }
-    return NextResponse.json(response)
+    // Return the full analysis result — Vercel serverless doesn't share in-memory state
+    // across instances, so the client must receive the data directly
+    const result = getAnalysis(id)
+    return NextResponse.json(result || { id, owner, repo, status: 'error' })
   } catch (err) {
     console.error('Analyze endpoint error:', err)
     return NextResponse.json(

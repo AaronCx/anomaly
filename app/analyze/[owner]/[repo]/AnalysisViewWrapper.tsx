@@ -1,8 +1,10 @@
 'use client'
 
-import { useAnalysis } from '@/hooks/useAnalysis'
+import { useState, useEffect } from 'react'
 import AnalysisView from '@/components/visualization/AnalysisView'
 import { TEXT_DIM, ACCENT, CARD_BG, CARD_BORDER } from '@/lib/color-schemes'
+import type { AnalysisResult } from '@/lib/types'
+import { analyzeRepo } from '@/lib/api'
 
 interface AnalysisViewWrapperProps {
   owner: string
@@ -13,10 +15,51 @@ interface AnalysisViewWrapperProps {
 export default function AnalysisViewWrapper({
   owner,
   repo,
-  analysisId: explicitId,
+  analysisId,
 }: AnalysisViewWrapperProps) {
-  const analysisId = explicitId || `${owner}/${repo}`
-  const { analysis, progress, isLoading, error } = useAnalysis(analysisId)
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [statusMessage, setStatusMessage] = useState('Loading analysis...')
+
+  useEffect(() => {
+    // First try sessionStorage (data from the POST response)
+    if (analysisId) {
+      const cached = sessionStorage.getItem(`anomaly-analysis-${analysisId}`)
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as AnalysisResult
+          if (parsed.status === 'complete' && parsed.modules) {
+            setAnalysis(parsed)
+            setIsLoading(false)
+            return
+          }
+        } catch {
+          // Invalid cache, fall through to re-analyze
+        }
+      }
+    }
+
+    // No cached data — run analysis fresh
+    setStatusMessage('Analyzing repository...')
+    analyzeRepo(`https://github.com/${owner}/${repo}`)
+      .then((result) => {
+        if (result.status === 'complete' || result.modules) {
+          setAnalysis(result)
+          // Cache for future visits
+          if (result.id) {
+            sessionStorage.setItem(`anomaly-analysis-${result.id}`, JSON.stringify(result))
+          }
+        } else {
+          setError(result.status === 'error' ? 'Analysis failed' : 'Analysis incomplete')
+        }
+        setIsLoading(false)
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to analyze repository')
+        setIsLoading(false)
+      })
+  }, [owner, repo, analysisId])
 
   if (error) {
     return (
@@ -25,13 +68,20 @@ export default function AnalysisViewWrapper({
         style={{ background: '#0a0a0f' }}
       >
         <div
-          className="rounded-lg px-6 py-4 text-center"
+          className="rounded-lg px-6 py-4 text-center max-w-md"
           style={{ background: CARD_BG, border: `1px solid ${CARD_BORDER}` }}
         >
           <p className="text-sm font-medium text-red-400">Analysis failed</p>
           <p className="mt-1 text-xs" style={{ color: TEXT_DIM }}>
             {error}
           </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-3 px-4 py-2 rounded text-xs font-medium"
+            style={{ background: ACCENT, color: '#fff' }}
+          >
+            Try Again
+          </button>
         </div>
       </div>
     )
@@ -49,30 +99,12 @@ export default function AnalysisViewWrapper({
             style={{ borderColor: `${ACCENT} transparent ${ACCENT}40 ${ACCENT}40` }}
           />
           <span className="text-sm font-medium" style={{ color: '#e2e8f0' }}>
-            {progress?.message || 'Loading analysis...'}
+            {statusMessage}
           </span>
         </div>
-        {progress && (
-          <div className="w-64">
-            <div
-              className="h-1 w-full overflow-hidden rounded-full"
-              style={{ background: CARD_BORDER }}
-            >
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${progress.progress}%`,
-                  background: ACCENT,
-                  boxShadow: `0 0 8px ${ACCENT}60`,
-                }}
-              />
-            </div>
-            <div className="mt-1 flex justify-between text-[10px]" style={{ color: TEXT_DIM }}>
-              <span>{progress.status}</span>
-              <span>{progress.progress}%</span>
-            </div>
-          </div>
-        )}
+        <p className="text-xs" style={{ color: TEXT_DIM }}>
+          This may take up to 30 seconds for large repos
+        </p>
       </div>
     )
   }

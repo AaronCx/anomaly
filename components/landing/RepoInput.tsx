@@ -24,8 +24,12 @@ export default function RepoInput() {
 
     setLoading(true)
     try {
-      const res = await analyzeRepo(`https://github.com/${parsed.owner}/${parsed.repo}`)
-      router.push(`/analyze/${res.owner}/${res.repo}?id=${res.id}`)
+      const result = await analyzeRepo(`https://github.com/${parsed.owner}/${parsed.repo}`)
+      // Store full analysis in sessionStorage — Vercel serverless can't share in-memory state
+      if (result.id) {
+        sessionStorage.setItem(`anomaly-analysis-${result.id}`, JSON.stringify(result))
+      }
+      router.push(`/analyze/${parsed.owner}/${parsed.repo}?id=${result.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed. Try again.')
       setLoading(false)

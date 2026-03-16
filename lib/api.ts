@@ -19,8 +19,8 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
-export async function analyzeRepo(repoUrl: string): Promise<AnalyzeResponse> {
-  return fetchJSON<AnalyzeResponse>(`${API_BASE}/analyze`, {
+export async function analyzeRepo(repoUrl: string): Promise<AnalysisResult> {
+  return fetchJSON<AnalysisResult>(`${API_BASE}/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl }),

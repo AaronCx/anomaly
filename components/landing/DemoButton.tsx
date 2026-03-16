@@ -6,16 +6,15 @@ import { CARD_BG, CARD_BORDER, TEXT_PRIMARY, TEXT_DIM } from '@/lib/color-scheme
 interface DemoButtonProps {
   owner: string
   repo: string
-  demoId: string
   label?: string
 }
 
-export default function DemoButton({ owner, repo, demoId, label }: DemoButtonProps) {
+export default function DemoButton({ owner, repo, label }: DemoButtonProps) {
   const router = useRouter()
 
   return (
     <button
-      onClick={() => router.push(`/analyze/${owner}/${repo}?id=${demoId}`)}
+      onClick={() => router.push(`/analyze/${owner}/${repo}`)}
       className="rounded-full border px-4 py-1.5 font-mono text-sm transition-all duration-200 hover:border-accent hover:text-accent cursor-pointer"
       style={{
         backgroundColor: CARD_BG,

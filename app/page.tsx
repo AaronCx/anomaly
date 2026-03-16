@@ -2,10 +2,10 @@ import RepoInput from '@/components/landing/RepoInput'
 import DemoButton from '@/components/landing/DemoButton'
 
 const DEMOS = [
-  { owner: 'jondot', repo: 'AgentForge', demoId: 'demo-agentforge' },
-  { owner: 'AaronCx', repo: 'LastGate', demoId: 'demo-lastgate' },
-  { owner: 'expressjs', repo: 'express', demoId: 'demo-express' },
-  { owner: 'fastapi', repo: 'fastapi', demoId: 'demo-fastapi' },
+  { owner: 'AaronCx', repo: 'agentforge' },
+  { owner: 'AaronCx', repo: 'lastgate' },
+  { owner: 'expressjs', repo: 'express' },
+  { owner: 'tiangolo', repo: 'fastapi' },
 ]
 
 export default function Home() {
@@ -42,10 +42,9 @@ export default function Home() {
           <div className="flex flex-wrap justify-center gap-2">
             {DEMOS.map((d) => (
               <DemoButton
-                key={d.demoId}
+                key={`${d.owner}/${d.repo}`}
                 owner={d.owner}
                 repo={d.repo}
-                demoId={d.demoId}
               />
             ))}
           </div>

@@ -429,16 +429,29 @@ export default function ForceGraph({
 
     buildSimulation();
 
-    // Zoom behavior
+    // Zoom behavior — filtered to NOT activate when mouse is over a node
     const zoomBehavior = d3
       .zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 10])
+      .filter((event: Event) => {
+        // Allow scroll wheel zoom always
+        if (event.type === 'wheel') return true;
+        // For mouse/touch events, only allow zoom/pan when NOT on a node
+        if (event instanceof MouseEvent || event instanceof TouchEvent) {
+          const e = event as MouseEvent;
+          const node = hitTest(e.offsetX, e.offsetY);
+          return !node; // Block zoom/pan when hovering a node
+        }
+        return true;
+      })
       .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         transformRef.current = event.transform;
       });
 
     const sel = d3.select(canvas);
     sel.call(zoomBehavior);
+    // Disable d3's built-in double-click zoom (we handle dblclick ourselves)
+    sel.on('dblclick.zoom', null);
 
     // Drag behavior
     let dragNode: SimNode | null = null;
@@ -505,11 +518,61 @@ export default function ForceGraph({
       }
     };
 
+    // Touch support for mobile
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      mouseDownPos = { x, y };
+      didDrag = false;
+      const node = hitTest(x, y);
+      if (node) {
+        dragNode = node;
+        dragNode.fx = dragNode.x;
+        dragNode.fy = dragNode.y;
+        simRef.current?.alphaTarget(0.3).restart();
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      if (dragNode) {
+        const dx = x - mouseDownPos.x;
+        const dy = y - mouseDownPos.y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true;
+        const t = transformRef.current;
+        dragNode.fx = (x - t.x) / t.k;
+        dragNode.fy = (y - t.y) / t.k;
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (dragNode) {
+        if (!didDrag) {
+          // It was a tap, not a drag — treat as click
+          if (onNodeClick) onNodeClick(dragNode);
+        }
+        dragNode.fx = null;
+        dragNode.fy = null;
+        dragNode = null;
+        simRef.current?.alphaTarget(0);
+      }
+    };
+
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('click', handleClick);
     canvas.addEventListener('dblclick', handleDblClick);
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: true });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: true });
+    canvas.addEventListener('touchend', handleTouchEnd);
 
     // Start render loop
     animFrameRef.current = requestAnimationFrame(draw);
@@ -521,6 +584,9 @@ export default function ForceGraph({
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('click', handleClick);
       canvas.removeEventListener('dblclick', handleDblClick);
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
       cancelAnimationFrame(animFrameRef.current);
       simRef.current?.stop();
     };

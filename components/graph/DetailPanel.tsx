@@ -46,7 +46,19 @@ export default function DetailPanel({
     .filter(Boolean) as GraphNode[];
 
   return (
-    <div className="fixed right-0 top-0 z-40 flex h-dvh w-[40%] min-w-[360px] max-w-[600px] flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
+    <>
+    {/* Backdrop to prevent click-through on mobile */}
+    <div
+      className="fixed inset-0 z-30"
+      onClick={onClose}
+      onTouchStart={(e) => e.stopPropagation()}
+      style={{ background: 'rgba(0,0,0,0.3)' }}
+    />
+    <div
+      className="fixed right-0 top-0 z-40 flex h-dvh w-[90%] sm:w-[40%] min-w-0 sm:min-w-[360px] max-w-[600px] flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl"
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="flex items-center gap-2 overflow-hidden">
@@ -193,5 +205,6 @@ export default function DetailPanel({
         )}
       </div>
     </div>
+    </>
   );
 }

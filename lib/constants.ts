@@ -16,8 +16,8 @@ export const COLORS = {
 
 export const FILE_TYPE_COLORS: Record<FileType, string> = {
   component: '#60a5fa',
-  route: '#22d3ee',
-  service: '#fbbf24',
+  route: '#ef4444',
+  service: '#22c55e',
   utility: '#9ca3af',
   model: '#a78bfa',
   test: '#fb923c',

@@ -7,7 +7,7 @@ import { FILE_TYPE_COLORS, COLORS } from '@/lib/constants';
 const NODE_LEGEND = [
   { label: 'Components / Pages', color: FILE_TYPE_COLORS.component, desc: 'React components, page files' },
   { label: 'Routes / API', color: FILE_TYPE_COLORS.route, desc: 'API routes, endpoint handlers' },
-  { label: 'Services / Logic', color: FILE_TYPE_COLORS.service, desc: 'Business logic, helpers' },
+  { label: 'Services / Logic', color: FILE_TYPE_COLORS.service, desc: 'Business logic, services' },
   { label: 'Utilities', color: FILE_TYPE_COLORS.utility, desc: 'Shared utility functions' },
   { label: 'Models / Types', color: FILE_TYPE_COLORS.model, desc: 'Data models, type definitions' },
   { label: 'Tests', color: FILE_TYPE_COLORS.test, desc: 'Test files, specs' },

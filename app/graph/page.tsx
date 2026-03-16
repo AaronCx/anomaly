@@ -209,10 +209,12 @@ function GraphPageInner() {
   }, []);
 
   const handleNodeClick = useCallback((node: GraphNode | null) => {
+    console.log('[GraphPage] handleNodeClick called, node:', node?.label ?? 'null');
     if (!node || !node.id) {
-      setSelectedNode(null); // Click on empty space = deselect
+      setSelectedNode(null);
     } else {
       setSelectedNode(node);
+      console.log('[GraphPage] selectedNode set to:', node.label);
     }
   }, []);
 

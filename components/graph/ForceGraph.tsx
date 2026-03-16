@@ -431,22 +431,40 @@ export default function ForceGraph({
 
     const sel = d3.select(canvas);
 
-    // Track if zoom/pan moved the canvas (to distinguish pan from click)
-    let zoomMoved = false;
     let dragNode: SimNode | null = null;
+    let pointerDownOnNode = false;
+
+    // ── Register our pointerdown FIRST (before d3.zoom) ──
+    // This fires before d3.zoom's pointerdown handler
+    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      const node = hitTest(e.offsetX, e.offsetY);
+      if (node) {
+        pointerDownOnNode = true;
+        dragNode = node;
+        dragNode.fx = dragNode.x;
+        dragNode.fy = dragNode.y;
+        simRef.current?.alphaTarget(0.1).restart();
+      } else {
+        pointerDownOnNode = false;
+      }
+    });
 
     // ── d3.zoom for pan + scroll zoom ──
     const zoomBehavior = d3
       .zoom<HTMLCanvasElement, unknown>()
       .scaleExtent([0.1, 10])
-      .on('start', () => { zoomMoved = false; })
+      .filter((event: Event) => {
+        // Block zoom/pan when we're starting a node interaction
+        if (pointerDownOnNode && (event.type === 'mousedown' || event.type === 'pointerdown')) {
+          return false;
+        }
+        return event.type !== 'dblclick'; // We handle dblclick
+      })
       .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
         transformRef.current = event.transform;
-        if (event.sourceEvent) zoomMoved = true;
       });
 
     sel.call(zoomBehavior);
-    sel.on('dblclick.zoom', null); // We handle dblclick ourselves
 
     // ── Mouse handlers ──
     const handleMouseMove = (e: MouseEvent) => {
@@ -471,44 +489,21 @@ export default function ForceGraph({
       canvas.style.cursor = node ? 'pointer' : 'grab';
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
-      const node = hitTest(e.offsetX, e.offsetY);
-      if (node) {
-        // Start dragging this node — prevent d3.zoom from panning
-        e.stopPropagation();
-        dragNode = node;
-        dragNode.fx = dragNode.x;
-        dragNode.fy = dragNode.y;
-        simRef.current?.alphaTarget(0.3).restart();
-        zoomMoved = true; // Prevent click handler from firing for zoom
-      }
-      zoomMoved = false;
-    };
-
-    const handleMouseUp = (e: MouseEvent) => {
+    const handleMouseUp = () => {
       if (dragNode) {
-        const wasDrag = dragNode.fx !== dragNode.x || dragNode.fy !== dragNode.y;
         const clickedNode = dragNode;
         dragNode.fx = null;
         dragNode.fy = null;
         dragNode = null;
         simRef.current?.alphaTarget(0);
-
-        // If mouse barely moved, treat as click
-        if (!wasDrag && onNodeClick) {
-          onNodeClick(clickedNode);
-        }
+        // Always fire click for the dragged/clicked node
+        if (onNodeClick) onNodeClick(clickedNode);
         return;
       }
     };
 
-    const handleClick = (e: MouseEvent) => {
-      // Only fires when NOT on a node (mousedown on node stops propagation)
-      if (zoomMoved) return; // Was a pan gesture, not a click
-      const node = hitTest(e.offsetX, e.offsetY);
-      if (node && onNodeClick) {
-        onNodeClick(node);
-      }
+    const handleClick = () => {
+      // Node clicks handled by mouseUp via pointerdown/dragNode tracking
     };
 
     const handleDblClick = (e: MouseEvent) => {
@@ -540,7 +535,7 @@ export default function ForceGraph({
       touchStartNode = null;
     };
 
-    canvas.addEventListener('mousedown', handleMouseDown, true); // Capture phase to beat d3.zoom
+    // mousedown handled by pointerdown above
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('click', handleClick);
@@ -554,7 +549,7 @@ export default function ForceGraph({
 
     return () => {
       window.removeEventListener('resize', resizeCanvas);
-      canvas.removeEventListener('mousedown', handleMouseDown, true);
+      // pointerdown cleaned up separately
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('click', handleClick);

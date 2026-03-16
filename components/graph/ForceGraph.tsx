@@ -109,8 +109,9 @@ export default function ForceGraph({
 
     // Scale physics by graph size AND edge density
     const nodeCount = data.nodes.length;
-    const edgeCount = data.edges.length;
-    const edgeDensity = nodeCount > 0 ? edgeCount / nodeCount : 0;
+    // Only count import+call edges for density (export edges are visual-only)
+    const physicsEdgeCount = data.edges.filter((e) => e.type !== 'export').length;
+    const edgeDensity = nodeCount > 0 ? physicsEdgeCount / nodeCount : 0;
     // More edges per node = need more repulsion and weaker links
     const densityFactor = Math.max(1, 1 + (edgeDensity - 2) * 0.25); // baseline at 2 edges/node
     const sizeFactor = Math.max(1, 1 + Math.log10(Math.max(nodeCount / 40, 1)) * 0.3);
@@ -134,7 +135,8 @@ export default function ForceGraph({
 
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-    const links: SimLink[] = data.edges
+    // All edges for rendering
+    const allLinks: SimLink[] = data.edges
       .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
       .map((e) => ({
         source: e.source,
@@ -142,7 +144,11 @@ export default function ForceGraph({
         weight: e.weight,
         type: e.type,
       }));
-    linksRef.current = links;
+    linksRef.current = allLinks;
+
+    // Only import + call edges drive the physics (export edges are visual-only,
+    // they're the reverse of imports and would double the pull force)
+    const physicsLinks = allLinks.filter((l) => l.type !== 'export');
     clustersRef.current = data.clusters;
 
     // Stop previous simulation
@@ -156,7 +162,7 @@ export default function ForceGraph({
       .force(
         'link',
         d3
-          .forceLink<SimNode, SimLink>(links)
+          .forceLink<SimNode, SimLink>(physicsLinks)
           .id((d) => d.id)
           .distance(linkDist)
           .strength(linkStrength),

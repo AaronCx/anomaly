@@ -474,6 +474,10 @@ export default function ForceGraph({
         const node = event.subject as SimNode;
         node.fx = null;
         node.fy = null;
+        // If it wasn't a real drag (no movement), treat as a click
+        if (!didDrag && onNodeClick) {
+          onNodeClick(node);
+        }
       });
 
     sel.call(dragBehavior as unknown as (sel: d3.Selection<HTMLCanvasElement, unknown, null, undefined>) => void);

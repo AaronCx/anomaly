@@ -1,14 +1,23 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import LoadingGraph from '@/components/shared/LoadingGraph';
+import ForceGraph from '@/components/graph/ForceGraph';
+import NodeTooltip from '@/components/graph/NodeTooltip';
+import DetailPanel from '@/components/graph/DetailPanel';
+import SearchOverlay from '@/components/graph/SearchOverlay';
+import FilterBar from '@/components/graph/FilterBar';
+import GraphControls from '@/components/graph/GraphControls';
+import Minimap from '@/components/graph/Minimap';
 import { parseFile } from '@/lib/parser';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import type { ParsedFile } from '@/lib/parser/types';
-import type { GraphData } from '@/lib/graph/types';
+import type { GraphData, GraphNode } from '@/lib/graph/types';
 import { classifyFileType } from '@/lib/utils';
 import { FILE_TYPE_COLORS } from '@/lib/constants';
+import { useGraphFilters } from '@/hooks/useGraphFilters';
+import { useSearch } from '@/hooks/useSearch';
 
 /** Convert parsed files into graph data */
 function buildGraph(parsed: ParsedFile[]): GraphData {
@@ -33,7 +42,6 @@ function buildGraph(parsed: ParsedFile[]): GraphData {
   const edgeMap = new Map<string, number>();
   for (const file of parsed) {
     for (const imp of file.imports) {
-      // Try to resolve the import to a file in the codebase
       const resolved = resolveImport(imp.source, file.filePath, nodeIds);
       if (resolved) {
         const key = `${file.filePath}|${resolved}`;
@@ -59,11 +67,11 @@ function buildGraph(parsed: ParsedFile[]): GraphData {
 
   const clusterColors = Object.values(FILE_TYPE_COLORS);
   const clusters = Array.from(clusterMap.entries()).map(
-    ([dir, nodeIds], i) => ({
+    ([dir, ids], i) => ({
       id: dir,
       label: dir,
       color: clusterColors[i % clusterColors.length],
-      nodeIds,
+      nodeIds: ids,
     }),
   );
 
@@ -76,19 +84,16 @@ function resolveImport(
   fromFile: string,
   nodeIds: Set<string>,
 ): string | null {
-  // Skip external packages
   if (!source.startsWith('.') && !source.startsWith('@/') && !source.startsWith('~/')) {
     return null;
   }
 
-  // Handle alias imports
   let resolved = source;
   if (source.startsWith('@/')) {
     resolved = source.slice(2);
   } else if (source.startsWith('~/')) {
     resolved = source.slice(2);
   } else {
-    // Relative import
     const fromDir = fromFile.includes('/')
       ? fromFile.split('/').slice(0, -1).join('/')
       : '.';
@@ -100,7 +105,6 @@ function resolveImport(
     resolved = parts.join('/');
   }
 
-  // Try with common extensions
   const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
   for (const ext of extensions) {
     if (nodeIds.has(resolved + ext)) return resolved + ext;
@@ -120,15 +124,28 @@ function GraphPageInner() {
   const [fileCount, setFileCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // Interaction state
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showMinimap, setShowMinimap] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
+
+  // Hooks
+  const { activeFilters, toggleFilter, resetFilters } = useGraphFilters();
+  const { isOpen: searchOpen, close: closeSearch, highlightedNodeId, selectResult } = useSearch();
+
+  // File contents for detail panel (from sessionStorage if local)
+  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        let files: Map<string, string>;
+        let files: Map<string, string> | undefined;
 
         if (demo) {
-          // Load pre-parsed demo
           const res = await fetch(`/demos/${demo}.json`);
           if (!res.ok) throw new Error(`Demo "${demo}" not found`);
           const data: GraphData = await res.json();
@@ -140,30 +157,28 @@ function GraphPageInner() {
         }
 
         if (local === 'true') {
-          // Read files from sessionStorage
           const raw = sessionStorage.getItem('anomaly:local-files');
           if (!raw) throw new Error('No local files found. Please go back and drop your folder again.');
           const entries: { path: string; content: string }[] = JSON.parse(raw);
           files = new Map(entries.map((e) => [e.path, e.content]));
           sessionStorage.removeItem('anomaly:local-files');
         } else if (repo) {
-          // Fetch from GitHub
           const [owner, repoName] = repo.split('/');
           if (!owner || !repoName) throw new Error('Invalid repo format');
           const token = typeof window !== 'undefined'
             ? localStorage.getItem('anomaly:gh-token') ?? undefined
             : undefined;
-          files = await loadFromGitHub(owner, repoName, token, (loaded, total) => {
+          files = await loadFromGitHub(owner, repoName, token, (_loaded, total) => {
             if (!cancelled) setFileCount(total);
           });
         } else {
           throw new Error('No data source specified');
         }
 
-        if (cancelled) return;
+        if (cancelled || !files) return;
         setFileCount(files.size);
+        setFileContents(files);
 
-        // Parse all files
         const parsed: ParsedFile[] = [];
         for (const [path, content] of files) {
           parsed.push(parseFile(content, path));
@@ -186,6 +201,39 @@ function GraphPageInner() {
     return () => { cancelled = true; };
   }, [demo, repo, local]);
 
+  // Track mouse for tooltip
+  useEffect(() => {
+    const handler = (e: MouseEvent) => setMousePos({ x: e.clientX, y: e.clientY });
+    window.addEventListener('mousemove', handler);
+    return () => window.removeEventListener('mousemove', handler);
+  }, []);
+
+  const handleNodeClick = useCallback((node: GraphNode) => {
+    setSelectedNode((prev) => (prev?.id === node.id ? null : node));
+  }, []);
+
+  const handleNodeDoubleClick = useCallback((node: GraphNode) => {
+    // For now, select the node — function sub-graph is a future enhancement
+    setSelectedNode(node);
+  }, []);
+
+  const handleNavigate = useCallback((nodeId: string) => {
+    if (!graphData) return;
+    const node = graphData.nodes.find((n) => n.id === nodeId);
+    if (node) setSelectedNode(node);
+  }, [graphData]);
+
+  // Zoom controls (dispatch custom events that ForceGraph can handle)
+  const handleZoomIn = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('anomaly:zoom', { detail: { direction: 'in' } }));
+  }, []);
+  const handleZoomOut = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('anomaly:zoom', { detail: { direction: 'out' } }));
+  }, []);
+  const handleFitView = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('anomaly:zoom', { detail: { direction: 'fit' } }));
+  }, []);
+
   if (error) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-4 bg-[var(--color-bg)]">
@@ -201,17 +249,76 @@ function GraphPageInner() {
     return <LoadingGraph fileCount={fileCount} />;
   }
 
-  // Placeholder for the actual ForceGraph component
   return (
-    <div className="flex h-dvh w-full flex-col items-center justify-center bg-[var(--color-bg)]">
-      <div className="flex flex-col items-center gap-2">
-        <p className="font-[var(--font-mono)] text-sm text-[var(--color-text-muted)]">
-          {graphData.nodes.length} nodes, {graphData.edges.length} edges
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Force graph visualization coming next
-        </p>
-      </div>
+    <div className="relative h-dvh w-full overflow-hidden bg-[var(--color-bg)]">
+      {/* Canvas graph */}
+      <ForceGraph
+        data={graphData}
+        onNodeClick={handleNodeClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
+        selectedNodeId={selectedNode?.id}
+        filters={activeFilters}
+        searchHighlight={highlightedNodeId}
+        showLabels={showLabels}
+      />
+
+      {/* Filter bar */}
+      <FilterBar
+        activeFilters={activeFilters}
+        onToggle={toggleFilter}
+        onReset={resetFilters}
+      />
+
+      {/* Tooltip */}
+      {hoveredNode && (
+        <NodeTooltip node={hoveredNode} x={mousePos.x} y={mousePos.y} />
+      )}
+
+      {/* Detail panel */}
+      {selectedNode && (
+        <DetailPanel
+          node={selectedNode}
+          graphData={graphData}
+          fileContent={fileContents.get(selectedNode.filePath)}
+          onClose={() => setSelectedNode(null)}
+          onNavigate={handleNavigate}
+        />
+      )}
+
+      {/* Search overlay */}
+      <SearchOverlay
+        data={graphData}
+        open={searchOpen}
+        onClose={closeSearch}
+        onSelect={selectResult}
+      />
+
+      {/* Minimap */}
+      <Minimap
+        nodes={graphData.nodes}
+        viewportRect={{ x: 0, y: 0, width: 800, height: 600 }}
+        bounds={{
+          minX: Math.min(...graphData.nodes.map((n) => n.x ?? 0)),
+          minY: Math.min(...graphData.nodes.map((n) => n.y ?? 0)),
+          maxX: Math.max(...graphData.nodes.map((n) => n.x ?? 1000)),
+          maxY: Math.max(...graphData.nodes.map((n) => n.y ?? 1000)),
+        }}
+        onNavigate={() => {}}
+        visible={showMinimap}
+      />
+
+      {/* Graph controls */}
+      <GraphControls
+        nodeCount={graphData.nodes.length}
+        edgeCount={graphData.edges.length}
+        showMinimap={showMinimap}
+        showLabels={showLabels}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onFitView={handleFitView}
+        onToggleMinimap={() => setShowMinimap((v) => !v)}
+        onToggleLabels={() => setShowLabels((v) => !v)}
+      />
     </div>
   );
 }

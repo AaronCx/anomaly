@@ -36,6 +36,8 @@ export interface ForceGraphProps {
   searchHighlight?: string | null;
   showLabels?: boolean;
   showMinimap?: boolean;
+  nodeColors?: Record<FileType, string>;
+  visibleEdgeTypes?: Set<string>;
 }
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -71,6 +73,8 @@ export default function ForceGraph({
   onNodeDoubleClick,
   onNodeHover,
   hoveredNodeId: externalHoveredId,
+  nodeColors: customNodeColors,
+  visibleEdgeTypes,
   selectedNodeId,
   filters,
   searchHighlight,
@@ -285,6 +289,9 @@ export default function ForceGraph({
 
     /* ── Edges ─────────────────────────────────────────── */
     for (const link of links) {
+      // Skip edge types that are toggled off
+      if (visibleEdgeTypes && link.type && !visibleEdgeTypes.has(link.type)) continue;
+
       const s = link.source as SimNode;
       const t2 = link.target as SimNode;
       if (!isVisible(s) && !isVisible(t2)) continue;
@@ -384,7 +391,7 @@ export default function ForceGraph({
       // Skip tiny nodes when zoomed out
       if (r * k < 1.5 && node.id !== hovered && node.id !== selectedNodeId) continue;
 
-      const color = FILE_TYPE_COLORS[node.fileType] || FILE_TYPE_COLORS.unknown;
+      const color = (customNodeColors?.[node.fileType]) || FILE_TYPE_COLORS[node.fileType] || FILE_TYPE_COLORS.unknown;
       let alpha = visible ? 1 : 0.1;
 
       if (hovered && node.id !== hovered && !connectedSet!.has(node.id)) {
@@ -449,7 +456,7 @@ export default function ForceGraph({
     ctx.restore();
 
     animFrameRef.current = requestAnimationFrame(drawRef.current);
-  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels]);
+  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, visibleEdgeTypes]);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */

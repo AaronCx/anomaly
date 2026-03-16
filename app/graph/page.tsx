@@ -14,7 +14,7 @@ import Legend from '@/components/graph/Legend';
 import { parseFile } from '@/lib/parser';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import type { ParsedFile } from '@/lib/parser/types';
-import type { GraphData, GraphNode } from '@/lib/graph/types';
+import type { GraphData, GraphNode, FileType, EdgeType } from '@/lib/graph/types';
 import { classifyFileType } from '@/lib/utils';
 import { FILE_TYPE_COLORS } from '@/lib/constants';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
@@ -131,6 +131,25 @@ function GraphPageInner() {
   const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showMinimap, setShowMinimap] = useState(true);
   const [showLabels, setShowLabels] = useState(false);
+  const [nodeColors, setNodeColors] = useState<Record<FileType, string>>({ ...FILE_TYPE_COLORS });
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(new Set(['import', 'export', 'call']));
+
+  const handleNodeColorChange = useCallback((fileType: FileType, color: string) => {
+    setNodeColors((prev) => ({ ...prev, [fileType]: color }));
+  }, []);
+
+  const handleResetColors = useCallback(() => {
+    setNodeColors({ ...FILE_TYPE_COLORS });
+  }, []);
+
+  const handleToggleEdgeType = useCallback((edgeType: EdgeType) => {
+    setVisibleEdgeTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(edgeType)) next.delete(edgeType);
+      else next.add(edgeType);
+      return next;
+    });
+  }, []);
 
   // Hooks
   const { activeFilters, toggleFilter, resetFilters } = useGraphFilters();
@@ -269,6 +288,8 @@ function GraphPageInner() {
         filters={activeFilters}
         searchHighlight={highlightedNodeId}
         showLabels={showLabels}
+        nodeColors={nodeColors}
+        visibleEdgeTypes={visibleEdgeTypes}
       />
 
       {/* Filter bar */}
@@ -317,7 +338,13 @@ function GraphPageInner() {
       />
 
       {/* Legend */}
-      <Legend />
+      <Legend
+        nodeColors={nodeColors}
+        onNodeColorChange={handleNodeColorChange}
+        onResetColors={handleResetColors}
+        visibleEdgeTypes={visibleEdgeTypes}
+        onToggleEdgeType={handleToggleEdgeType}
+      />
 
       {/* Graph controls */}
       <GraphControls

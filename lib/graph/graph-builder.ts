@@ -120,58 +120,103 @@ function calculateComplexity(content: string, parsed: ParsedFile): number {
   return fnCount + controlFlowCount;
 }
 
+const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java'];
+
+/**
+ * Try to find a file in the map with various extension/index combinations.
+ */
+function tryResolve(path: string, fileMap: Map<string, string>): string | null {
+  if (fileMap.has(path)) return path;
+  for (const ext of EXTENSIONS) {
+    if (fileMap.has(path + ext)) return path + ext;
+  }
+  for (const ext of EXTENSIONS) {
+    const indexPath = path + '/index' + ext;
+    if (fileMap.has(indexPath)) return indexPath;
+  }
+  return null;
+}
+
+/**
+ * Detect app roots in a monorepo by finding directories that contain
+ * tsconfig.json or package.json (e.g., frontend/, apps/web/, packages/engine/).
+ */
+function detectAppRoots(fileMap: Map<string, string>): string[] {
+  const roots = new Set<string>();
+  roots.add(''); // Always try project root
+
+  for (const filePath of fileMap.keys()) {
+    const name = filePath.split('/').pop() || '';
+    if (name === 'tsconfig.json' || name === 'package.json') {
+      const dir = filePath.includes('/')
+        ? filePath.slice(0, filePath.lastIndexOf('/'))
+        : '';
+      if (dir) roots.add(dir);
+    }
+  }
+
+  return Array.from(roots);
+}
+
 /**
  * Resolve an import source to a file path in the project map.
- * Handles relative imports (./ ../) and tries common extensions.
+ * Handles relative imports, @/ alias with monorepo-aware root detection,
+ * and also tries resolving from the importing file's ancestor directories.
  */
 function resolveImport(
   source: string,
   fromFile: string,
   fileMap: Map<string, string>,
+  appRoots: string[],
 ): string | null {
-  // Skip external packages
-  if (!source.startsWith('.') && !source.startsWith('/') && !source.startsWith('@/')) {
-    return null;
-  }
-
-  // Handle @/ alias — treat as project root
-  let resolved: string;
+  // Skip external packages (but keep @/ alias)
   if (source.startsWith('@/')) {
-    resolved = source.slice(2);
-  } else {
-    // Resolve relative to the importing file's directory
-    const fromDir = fromFile.includes('/')
-      ? fromFile.slice(0, fromFile.lastIndexOf('/'))
-      : '';
-    const parts = fromDir.split('/').filter(Boolean);
-    const sourceParts = source.split('/');
+    // @/ alias — try each app root
+    const aliasPath = source.slice(2);
 
-    for (const part of sourceParts) {
-      if (part === '..') {
-        parts.pop();
-      } else if (part !== '.') {
-        parts.push(part);
-      }
+    // First try: resolve relative to the importing file's nearest app root
+    // e.g., if fromFile is "frontend/app/page.tsx", try "frontend/" + aliasPath
+    const fromParts = fromFile.split('/');
+    for (let i = fromParts.length - 1; i >= 1; i--) {
+      const prefix = fromParts.slice(0, i).join('/');
+      const candidate = prefix + '/' + aliasPath;
+      const result = tryResolve(candidate, fileMap);
+      if (result) return result;
     }
-    resolved = parts.join('/');
+
+    // Then try each detected app root
+    for (const root of appRoots) {
+      const candidate = root ? root + '/' + aliasPath : aliasPath;
+      const result = tryResolve(candidate, fileMap);
+      if (result) return result;
+    }
+
+    // Finally try bare path (project root)
+    return tryResolve(aliasPath, fileMap);
   }
 
-  // Try exact match first
-  if (fileMap.has(resolved)) return resolved;
+  // Skip other scoped packages (@org/package)
+  if (source.startsWith('@')) return null;
 
-  // Try common extensions
-  const extensions = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java'];
-  for (const ext of extensions) {
-    if (fileMap.has(resolved + ext)) return resolved + ext;
+  // Skip bare package names (no ./ or ../ prefix)
+  if (!source.startsWith('.') && !source.startsWith('/')) return null;
+
+  // Relative import — resolve from importing file's directory
+  const fromDir = fromFile.includes('/')
+    ? fromFile.slice(0, fromFile.lastIndexOf('/'))
+    : '';
+  const parts = fromDir.split('/').filter(Boolean);
+  const sourceParts = source.split('/');
+
+  for (const part of sourceParts) {
+    if (part === '..') {
+      parts.pop();
+    } else if (part !== '.') {
+      parts.push(part);
+    }
   }
 
-  // Try index files
-  for (const ext of extensions) {
-    const indexPath = resolved + '/index' + ext;
-    if (fileMap.has(indexPath)) return indexPath;
-  }
-
-  return null;
+  return tryResolve(parts.join('/'), fileMap);
 }
 
 /**
@@ -180,6 +225,7 @@ function resolveImport(
 export function buildGraph(files: Map<string, string>): GraphData {
   const nodes: GraphNode[] = [];
   const edgeMap = new Map<string, number>(); // "source->target" → weight
+  const appRoots = detectAppRoots(files);
 
   // Parse all files and create nodes
   const parsedFiles = new Map<string, ParsedFile>();
@@ -209,7 +255,7 @@ export function buildGraph(files: Map<string, string>): GraphData {
   // Build edges from imports
   for (const [filePath, parsed] of parsedFiles) {
     for (const imp of parsed.imports) {
-      const target = resolveImport(imp.source, filePath, files);
+      const target = resolveImport(imp.source, filePath, files, appRoots);
       if (target && target !== filePath) {
         const edgeKey = `${filePath}->${target}`;
         edgeMap.set(edgeKey, (edgeMap.get(edgeKey) ?? 0) + imp.specifiers.length);

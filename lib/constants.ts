@@ -28,11 +28,11 @@ export const FILE_TYPE_COLORS: Record<FileType, string> = {
 /* ── Physics / force simulation ───────────────────────── */
 
 export const PHYSICS = {
-  charge: -200,
+  charge: -150,
   linkDistance: 80,
   collisionPadding: 5,
-  alphaDecay: 0.01,
-  velocityDecay: 0.4,
+  alphaDecay: 0.03,    // Faster cooldown — graph settles in ~3 seconds
+  velocityDecay: 0.5,  // More damping — nodes don't drift as much
   centerStrength: 0.05,
 } as const;
 

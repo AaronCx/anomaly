@@ -112,11 +112,11 @@ export default function ForceGraph({
     const physicsEdgeCount = data.edges.filter((e) => e.type !== 'export').length;
     const edgeDensity = nodeCount > 0 ? physicsEdgeCount / nodeCount : 0;
 
-    // Strong repulsion that scales exponentially with edge density
-    const chargeStrength = -300 - (edgeDensity * edgeDensity * 60) - (Math.sqrt(nodeCount) * 10);
-    const linkDist = 120 + (edgeDensity * 25);
-    const linkStrength = Math.min(0.12, 0.2 / Math.max(edgeDensity, 1));
-    const collisionPad = 15 + edgeDensity * 5;
+    // Strong repulsion scaled by density — heavier graphs get pushed apart more
+    const chargeStrength = -400 - (edgeDensity * edgeDensity * 80) - (Math.sqrt(nodeCount) * 12);
+    const linkDist = 140 + (edgeDensity * 30);
+    const linkStrength = Math.min(0.1, 0.15 / Math.max(edgeDensity, 1));
+    const collisionPad = 20 + edgeDensity * 6;
 
     // Build nodes
     const spread = 0.5;

@@ -107,15 +107,15 @@ export default function ForceGraph({
     const width = canvas.width / (window.devicePixelRatio || 1);
     const height = canvas.height / (window.devicePixelRatio || 1);
 
-    // Scale physics by graph size — larger graphs need more spacing
+    // Scale physics by graph size — larger graphs need a bit more spacing
     const nodeCount = data.nodes.length;
-    const scaleFactor = Math.max(1, Math.sqrt(nodeCount / 40)); // 40 nodes = baseline
+    const scaleFactor = Math.max(1, 1 + Math.log10(nodeCount / 40) * 0.4); // Gentle log scale
     const chargeStrength = PHYSICS.charge * scaleFactor;
-    const linkDist = PHYSICS.linkDistance * scaleFactor;
-    const collisionPad = PHYSICS.collisionPadding + (scaleFactor - 1) * 3;
+    const linkDist = PHYSICS.linkDistance * Math.min(scaleFactor, 1.5);
+    const collisionPad = PHYSICS.collisionPadding + Math.min((scaleFactor - 1) * 2, 4);
 
-    // Build nodes — spread initial positions wider for large graphs
-    const spread = Math.min(1, 0.3 + scaleFactor * 0.2);
+    // Build nodes
+    const spread = 0.5;
     const nodes: SimNode[] = data.nodes.map((n, i) => ({
       ...n,
       x: n.x ?? width / 2 + (Math.random() - 0.5) * width * spread,
@@ -154,7 +154,7 @@ export default function ForceGraph({
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
           .distance(linkDist)
-          .strength(0.3 / scaleFactor), // Weaker links for larger graphs
+          .strength(0.25),
       )
       .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength))
       .force('center', d3.forceCenter(width / 2, height / 2))
@@ -162,8 +162,8 @@ export default function ForceGraph({
         'collision',
         d3.forceCollide<SimNode>().radius((d) => d.radius + collisionPad),
       )
-      .force('x', d3.forceX<SimNode>(width / 2).strength(0.015 / scaleFactor))
-      .force('y', d3.forceY<SimNode>(height / 2).strength(0.015 / scaleFactor))
+      .force('x', d3.forceX<SimNode>(width / 2).strength(0.03))
+      .force('y', d3.forceY<SimNode>(height / 2).strength(0.03))
       .alphaDecay(PHYSICS.alphaDecay)
       .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
@@ -613,7 +613,42 @@ export default function ForceGraph({
 
     animFrameRef.current = requestAnimationFrame(draw);
 
+    // Auto fit-to-view after simulation settles
+    let hasFitted = false;
+    const fitCheck = setInterval(() => {
+      if (hasFitted) return;
+      const sim = simRef.current;
+      if (!sim || sim.alpha() > 0.1) return;
+      hasFitted = true;
+      clearInterval(fitCheck);
+
+      const nodes = nodesRef.current;
+      if (nodes.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        minX = Math.min(minX, n.x - n.radius);
+        minY = Math.min(minY, n.y - n.radius);
+        maxX = Math.max(maxX, n.x + n.radius);
+        maxY = Math.max(maxY, n.y + n.radius);
+      }
+      const gw = maxX - minX;
+      const gh = maxY - minY;
+      if (gw > 0 && gh > 0) {
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.width / dpr;
+        const h = canvas.height / dpr;
+        const padding = 80;
+        const scale = Math.min((w - padding * 2) / gw, (h - padding * 2) / gh, 1.5);
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        transformRef.current = d3.zoomIdentity.translate(w / 2 - cx * scale, h / 2 - cy * scale).scale(scale);
+        sel.call(zoomBehavior.transform, transformRef.current);
+      }
+    }, 300);
+
     return () => {
+      clearInterval(fitCheck);
       window.removeEventListener('resize', resizeCanvas);
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);

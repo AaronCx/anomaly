@@ -88,6 +88,15 @@ export default function ForceGraph({
 
   const hoveredId = externalHoveredId ?? internalHovered;
 
+  // Refs for callbacks used in the stable setup effect
+  const onNodeClickRef = useRef(onNodeClick);
+  const onNodeDoubleClickRef = useRef(onNodeDoubleClick);
+  const onNodeHoverRef = useRef(onNodeHover);
+  const hitTestRef = useRef<((mx: number, my: number) => SimNode | null) | null>(null);
+  useEffect(() => { onNodeClickRef.current = onNodeClick; }, [onNodeClick]);
+  useEffect(() => { onNodeDoubleClickRef.current = onNodeDoubleClick; }, [onNodeDoubleClick]);
+  useEffect(() => { onNodeHoverRef.current = onNodeHover; }, [onNodeHover]);
+
   /* ── Build / rebuild simulation ──────────────────────── */
 
   const buildSimulation = useCallback(() => {
@@ -410,6 +419,8 @@ export default function ForceGraph({
     [],
   );
 
+  hitTestRef.current = hitTest;
+
   /* ── Setup canvas, zoom, drag ────────────────────────── */
 
   useEffect(() => {
@@ -450,7 +461,7 @@ export default function ForceGraph({
 
     const handleMouseDown = (e: MouseEvent) => {
       didMove = false;
-      const node = hitTest(e.offsetX, e.offsetY);
+      const node = hitTestRef.current?.(e.offsetX, e.offsetY);
       if (node) {
         dragNode = node;
         dragNode.fx = dragNode.x;
@@ -489,12 +500,12 @@ export default function ForceGraph({
       }
 
       // Hover detection only when not dragging/panning
-      const node = hitTest(e.offsetX, e.offsetY);
+      const node = hitTestRef.current?.(e.offsetX, e.offsetY);
       const newId = node?.id ?? null;
       if (newId !== hoveredRef.current) {
         hoveredRef.current = newId;
         setInternalHovered(newId);
-        if (onNodeHover) onNodeHover(node ?? null);
+        if (onNodeHoverRef.current) onNodeHoverRef.current(node ?? null);
       }
       canvas.style.cursor = node ? 'pointer' : 'default';
     };
@@ -506,7 +517,7 @@ export default function ForceGraph({
         dragNode.fy = null;
         dragNode = null;
         simRef.current?.alphaTarget(0);
-        if (!didMove && onNodeClick) onNodeClick(clickedNode);
+        if (!didMove && onNodeClickRef.current) onNodeClickRef.current(clickedNode);
         canvas.style.cursor = 'pointer';
         return;
       }
@@ -517,9 +528,9 @@ export default function ForceGraph({
     };
 
     const handleDblClick = (e: MouseEvent) => {
-      const node = hitTest(e.offsetX, e.offsetY);
-      if (node && onNodeDoubleClick) {
-        onNodeDoubleClick(node);
+      const node = hitTestRef.current?.(e.offsetX, e.offsetY);
+      if (node && onNodeDoubleClickRef.current) {
+        onNodeDoubleClickRef.current(node);
         e.preventDefault();
       }
     };
@@ -533,11 +544,11 @@ export default function ForceGraph({
       touchMoved = false;
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
-      touchStartNode = hitTest(touch.clientX - rect.left, touch.clientY - rect.top);
+      touchStartNode = hitTestRef.current?.(touch.clientX - rect.left, touch.clientY - rect.top) ?? null;
     };
     const handleTouchMove = () => { touchMoved = true; };
     const handleTouchEnd = () => {
-      if (touchStartNode && !touchMoved && onNodeClick) onNodeClick(touchStartNode);
+      if (touchStartNode && !touchMoved && onNodeClickRef.current) onNodeClickRef.current(touchStartNode);
       touchStartNode = null;
     };
 
@@ -563,7 +574,8 @@ export default function ForceGraph({
       cancelAnimationFrame(animFrameRef.current);
       simRef.current?.stop();
     };
-  }, [buildSimulation, draw, hitTest, onNodeClick, onNodeDoubleClick, onNodeHover]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally stable: rebuild only on data change, not on render state
+  }, [buildSimulation]);
 
   // Sync external hovered
   useEffect(() => {

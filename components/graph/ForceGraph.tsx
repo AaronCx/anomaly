@@ -1,0 +1,542 @@
+'use client';
+
+import { useEffect, useRef, useCallback, useState } from 'react';
+import * as d3 from 'd3';
+import type { GraphData, GraphNode, GraphEdge, FileType, Cluster } from '@/lib/graph/types';
+import { FILE_TYPE_COLORS, COLORS, PHYSICS, NODE } from '@/lib/constants';
+
+/* ── Simulation node/link with mutable D3 fields ─────────── */
+
+interface SimNode extends GraphNode {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  fx?: number | null;
+  fy?: number | null;
+}
+
+interface SimLink extends d3.SimulationLinkDatum<SimNode> {
+  source: SimNode | string;
+  target: SimNode | string;
+  weight: number;
+}
+
+export interface ForceGraphProps {
+  data: GraphData;
+  onNodeClick?: (node: GraphNode) => void;
+  onNodeDoubleClick?: (node: GraphNode) => void;
+  hoveredNodeId?: string | null;
+  selectedNodeId?: string | null;
+  filters?: Set<FileType>;
+  searchHighlight?: string | null;
+  showLabels?: boolean;
+  showMinimap?: boolean;
+}
+
+/* ── Helpers ─────────────────────────────────────────────── */
+
+function nodeRadius(loc: number): number {
+  return Math.max(NODE.minRadius, Math.min(NODE.maxRadius, Math.sqrt(loc) * 0.8));
+}
+
+function hexToRGBA(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function getConnected(nodeId: string, links: SimLink[]): Set<string> {
+  const connected = new Set<string>();
+  for (const l of links) {
+    const s = typeof l.source === 'string' ? l.source : l.source.id;
+    const t = typeof l.target === 'string' ? l.target : l.target.id;
+    if (s === nodeId) connected.add(t);
+    if (t === nodeId) connected.add(s);
+  }
+  connected.add(nodeId);
+  return connected;
+}
+
+/* ── Component ───────────────────────────────────────────── */
+
+export default function ForceGraph({
+  data,
+  onNodeClick,
+  onNodeDoubleClick,
+  hoveredNodeId: externalHoveredId,
+  selectedNodeId,
+  filters,
+  searchHighlight,
+  showLabels: forceShowLabels,
+}: ForceGraphProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+  const nodesRef = useRef<SimNode[]>([]);
+  const linksRef = useRef<SimLink[]>([]);
+  const clustersRef = useRef<Cluster[]>([]);
+  const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
+  const hoveredRef = useRef<string | null>(null);
+  const mouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const animFrameRef = useRef<number>(0);
+  const pulseRef = useRef<number>(0);
+  const [internalHovered, setInternalHovered] = useState<string | null>(null);
+
+  const hoveredId = externalHoveredId ?? internalHovered;
+
+  /* ── Build / rebuild simulation ──────────────────────── */
+
+  const buildSimulation = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const width = canvas.width / (window.devicePixelRatio || 1);
+    const height = canvas.height / (window.devicePixelRatio || 1);
+
+    // Build nodes
+    const nodes: SimNode[] = data.nodes.map((n) => ({
+      ...n,
+      x: n.x ?? width / 2 + (Math.random() - 0.5) * width * 0.5,
+      y: n.y ?? height / 2 + (Math.random() - 0.5) * height * 0.5,
+      vx: 0,
+      vy: 0,
+      radius: nodeRadius(n.loc),
+    }));
+    nodesRef.current = nodes;
+
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+    const links: SimLink[] = data.edges
+      .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
+      .map((e) => ({
+        source: e.source,
+        target: e.target,
+        weight: e.weight,
+      }));
+    linksRef.current = links;
+    clustersRef.current = data.clusters;
+
+    // Stop previous simulation
+    if (simRef.current) simRef.current.stop();
+
+    const sim = d3
+      .forceSimulation<SimNode>(nodes)
+      .force(
+        'link',
+        d3
+          .forceLink<SimNode, SimLink>(links)
+          .id((d) => d.id)
+          .distance(PHYSICS.linkDistance)
+          .strength(0.3),
+      )
+      .force('charge', d3.forceManyBody<SimNode>().strength(PHYSICS.charge))
+      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force(
+        'collision',
+        d3.forceCollide<SimNode>().radius((d) => d.radius + PHYSICS.collisionPadding),
+      )
+      .force('x', d3.forceX<SimNode>(width / 2).strength(0.02))
+      .force('y', d3.forceY<SimNode>(height / 2).strength(0.02))
+      .alphaDecay(PHYSICS.alphaDecay)
+      .velocityDecay(PHYSICS.velocityDecay)
+      .on('tick', () => {});
+
+    simRef.current = sim;
+  }, [data]);
+
+  /* ── Canvas rendering loop ───────────────────────────── */
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const t = transformRef.current;
+    const nodes = nodesRef.current;
+    const links = linksRef.current;
+    const clusters = clustersRef.current;
+    const hovered = hoveredRef.current;
+    const k = t.k; // zoom scale
+
+    pulseRef.current += 0.04;
+
+    // Whether a node is visible given filters
+    const isVisible = (n: SimNode) => {
+      if (!filters || filters.size === 0) return true;
+      return filters.has(n.fileType);
+    };
+
+    // Connected set for hover highlighting
+    const connectedSet = hovered ? getConnected(hovered, links) : null;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Clear
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Apply zoom transform
+    ctx.translate(t.x, t.y);
+    ctx.scale(k, k);
+
+    /* ── Cluster halos ─────────────────────────────────── */
+    if (k < 1.2) {
+      for (const cluster of clusters) {
+        const clusterNodes = nodes.filter((n) => cluster.nodeIds.includes(n.id) && isVisible(n));
+        if (clusterNodes.length < 2) continue;
+
+        const cx = clusterNodes.reduce((s, n) => s + n.x, 0) / clusterNodes.length;
+        const cy = clusterNodes.reduce((s, n) => s + n.y, 0) / clusterNodes.length;
+
+        let maxDist = 0;
+        for (const n of clusterNodes) {
+          const dist = Math.sqrt((n.x - cx) ** 2 + (n.y - cy) ** 2);
+          if (dist > maxDist) maxDist = dist;
+        }
+
+        const radius = maxDist + 40;
+        const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+        gradient.addColorStop(0, hexToRGBA(cluster.color, 0.06));
+        gradient.addColorStop(1, hexToRGBA(cluster.color, 0));
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // Cluster label when zoomed out
+        if (k < 0.8) {
+          ctx.font = `${14 / k}px var(--font-sans), sans-serif`;
+          ctx.fillStyle = hexToRGBA(cluster.color, 0.3);
+          ctx.textAlign = 'center';
+          ctx.fillText(cluster.label, cx, cy - radius * 0.3);
+        }
+      }
+    }
+
+    /* ── Edges ─────────────────────────────────────────── */
+    for (const link of links) {
+      const s = link.source as SimNode;
+      const t2 = link.target as SimNode;
+      if (!isVisible(s) && !isVisible(t2)) continue;
+
+      const bothVisible = isVisible(s) && isVisible(t2);
+
+      let opacity = 0.15;
+      let lineWidth = 0.5;
+
+      if (hovered) {
+        const sId = s.id;
+        const tId = t2.id;
+        if (connectedSet!.has(sId) && connectedSet!.has(tId) && (sId === hovered || tId === hovered)) {
+          opacity = 0.4;
+          lineWidth = 1.5;
+        } else {
+          opacity = 0.05;
+        }
+      }
+
+      if (!bothVisible) {
+        // Dashed for edges to hidden nodes
+        ctx.setLineDash([4, 4]);
+        opacity *= 0.3;
+      } else {
+        ctx.setLineDash([]);
+      }
+
+      // Scale opacity by weight
+      opacity = Math.min(opacity * (1 + link.weight * 0.15), 0.6);
+
+      // Quadratic bezier with slight curve
+      const mx = (s.x + t2.x) / 2;
+      const my = (s.y + t2.y) / 2;
+      const dx = t2.x - s.x;
+      const dy = t2.y - s.y;
+      const offset = Math.min(20, Math.sqrt(dx * dx + dy * dy) * 0.1);
+      const cpx = mx - dy * offset / Math.sqrt(dx * dx + dy * dy + 1);
+      const cpy = my + dx * offset / Math.sqrt(dx * dx + dy * dy + 1);
+
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
+      ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+
+      // Arrow indicator at 70% along the curve
+      if (k > 0.6 && lineWidth > 0.5) {
+        const tt = 0.7;
+        const ax = (1 - tt) * (1 - tt) * s.x + 2 * (1 - tt) * tt * cpx + tt * tt * t2.x;
+        const ay = (1 - tt) * (1 - tt) * s.y + 2 * (1 - tt) * tt * cpy + tt * tt * t2.y;
+        const tax = 2 * (1 - tt) * (cpx - s.x) + 2 * tt * (t2.x - cpx);
+        const tay = 2 * (1 - tt) * (cpy - s.y) + 2 * tt * (t2.y - cpy);
+        const angle = Math.atan2(tay, tax);
+        const arrowSize = 4;
+
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(
+          ax - arrowSize * Math.cos(angle - Math.PI / 6),
+          ay - arrowSize * Math.sin(angle - Math.PI / 6),
+        );
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(
+          ax - arrowSize * Math.cos(angle + Math.PI / 6),
+          ay - arrowSize * Math.sin(angle + Math.PI / 6),
+        );
+        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.lineWidth = lineWidth;
+        ctx.stroke();
+      }
+
+      ctx.setLineDash([]);
+    }
+
+    /* ── Nodes ─────────────────────────────────────────── */
+    for (const node of nodes) {
+      const visible = isVisible(node);
+      if (!visible && !hovered) continue;
+
+      const r = node.radius;
+
+      // Skip tiny nodes when zoomed out
+      if (r * k < 1.5 && node.id !== hovered && node.id !== selectedNodeId) continue;
+
+      const color = FILE_TYPE_COLORS[node.fileType] || FILE_TYPE_COLORS.unknown;
+      let alpha = visible ? 1 : 0.1;
+
+      if (hovered && node.id !== hovered && !connectedSet!.has(node.id)) {
+        alpha *= 0.3;
+      }
+
+      // Glow gradient
+      const glowRadius = node.id === hovered ? r * 2.5 : node.id === selectedNodeId ? r * 3 : r * 1.8;
+      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
+
+      if (node.id === selectedNodeId) {
+        gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+        gradient.addColorStop(0.3, hexToRGBA(color, 0.8 * alpha));
+        gradient.addColorStop(1, hexToRGBA(color, 0));
+      } else if (node.id === hovered) {
+        gradient.addColorStop(0, `rgba(255, 255, 255, ${0.9 * alpha})`);
+        gradient.addColorStop(0.4, hexToRGBA(color, 0.7 * alpha));
+        gradient.addColorStop(1, hexToRGBA(color, 0));
+      } else {
+        gradient.addColorStop(0, hexToRGBA(color, alpha));
+        gradient.addColorStop(0.6, hexToRGBA(color, 0.3 * alpha));
+        gradient.addColorStop(1, hexToRGBA(color, 0));
+      }
+
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      // Solid core
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = node.id === selectedNodeId
+        ? `rgba(255, 255, 255, ${alpha})`
+        : node.id === hovered
+          ? `rgba(255, 255, 255, ${0.9 * alpha})`
+          : hexToRGBA(color, alpha);
+      ctx.fill();
+
+      // Search highlight pulse
+      if (searchHighlight && node.id === searchHighlight) {
+        const pulseAlpha = 0.3 + 0.3 * Math.sin(pulseRef.current);
+        const pulseRadius = r * 2 + 6 * Math.sin(pulseRef.current);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${pulseAlpha})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Labels
+      const showLabel = forceShowLabels || k > 1.5 || node.id === hovered || node.id === selectedNodeId;
+      if (showLabel && visible) {
+        ctx.font = `11px var(--font-mono), 'JetBrains Mono', monospace`;
+        ctx.fillStyle = `rgba(228, 228, 239, 0.7)`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(node.label, node.x, node.y + r + 4);
+      }
+    }
+
+    ctx.restore();
+
+    animFrameRef.current = requestAnimationFrame(draw);
+  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels]);
+
+  /* ── Hit testing ─────────────────────────────────────── */
+
+  const hitTest = useCallback(
+    (mx: number, my: number): SimNode | null => {
+      const t = transformRef.current;
+      const x = (mx - t.x) / t.k;
+      const y = (my - t.y) / t.k;
+
+      let closest: SimNode | null = null;
+      let closestDist = Infinity;
+
+      for (const node of nodesRef.current) {
+        const dx = node.x - x;
+        const dy = node.y - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const hitRadius = Math.max(node.radius, 8);
+        if (dist < hitRadius && dist < closestDist) {
+          closest = node;
+          closestDist = dist;
+        }
+      }
+
+      return closest;
+    },
+    [],
+  );
+
+  /* ── Setup canvas, zoom, drag ────────────────────────── */
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const resizeCanvas = () => {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = `${window.innerWidth}px`;
+      canvas.style.height = `${window.innerHeight}px`;
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    buildSimulation();
+
+    // Zoom behavior
+    const zoomBehavior = d3
+      .zoom<HTMLCanvasElement, unknown>()
+      .scaleExtent([0.1, 10])
+      .on('zoom', (event: d3.D3ZoomEvent<HTMLCanvasElement, unknown>) => {
+        transformRef.current = event.transform;
+      });
+
+    const sel = d3.select(canvas);
+    sel.call(zoomBehavior);
+
+    // Drag behavior
+    let dragNode: SimNode | null = null;
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const node = hitTest(e.offsetX, e.offsetY);
+      if (node) {
+        dragNode = node;
+        dragNode.fx = dragNode.x;
+        dragNode.fy = dragNode.y;
+        simRef.current?.alphaTarget(0.3).restart();
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseRef.current = { x: e.offsetX, y: e.offsetY };
+
+      if (dragNode) {
+        const t = transformRef.current;
+        dragNode.fx = (e.offsetX - t.x) / t.k;
+        dragNode.fy = (e.offsetY - t.y) / t.k;
+        return;
+      }
+
+      const node = hitTest(e.offsetX, e.offsetY);
+      const newId = node?.id ?? null;
+      if (newId !== hoveredRef.current) {
+        hoveredRef.current = newId;
+        setInternalHovered(newId);
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (dragNode) {
+        dragNode.fx = null;
+        dragNode.fy = null;
+        dragNode = null;
+        simRef.current?.alphaTarget(0);
+      }
+    };
+
+    const handleClick = (e: MouseEvent) => {
+      const node = hitTest(e.offsetX, e.offsetY);
+      if (node && onNodeClick) onNodeClick(node);
+    };
+
+    const handleDblClick = (e: MouseEvent) => {
+      const node = hitTest(e.offsetX, e.offsetY);
+      if (node && onNodeDoubleClick) {
+        onNodeDoubleClick(node);
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('click', handleClick);
+    canvas.addEventListener('dblclick', handleDblClick);
+
+    // Start render loop
+    animFrameRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('click', handleClick);
+      canvas.removeEventListener('dblclick', handleDblClick);
+      cancelAnimationFrame(animFrameRef.current);
+      simRef.current?.stop();
+    };
+  }, [buildSimulation, draw, hitTest, onNodeClick, onNodeDoubleClick]);
+
+  // Sync external hovered
+  useEffect(() => {
+    hoveredRef.current = hoveredId ?? null;
+  }, [hoveredId]);
+
+  /* ── Expose zoom-to-node for external use ─────────── */
+
+  useEffect(() => {
+    if (!searchHighlight) return;
+    const node = nodesRef.current.find((n) => n.id === searchHighlight);
+    if (!node || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const sel = d3.select(canvas);
+    const zoomBehavior = d3.zoom<HTMLCanvasElement, unknown>().scaleExtent([0.1, 10]);
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+
+    sel.transition().duration(800).call(
+      zoomBehavior.transform,
+      d3.zoomIdentity.translate(w / 2 - node.x * 2, h / 2 - node.y * 2).scale(2),
+    );
+  }, [searchHighlight]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 h-dvh w-dvw cursor-grab active:cursor-grabbing"
+      style={{ touchAction: 'none' }}
+    />
+  );
+}

@@ -107,12 +107,17 @@ export default function ForceGraph({
     const width = canvas.width / (window.devicePixelRatio || 1);
     const height = canvas.height / (window.devicePixelRatio || 1);
 
-    // Scale physics by graph size — larger graphs need a bit more spacing
+    // Scale physics by graph size AND edge density
     const nodeCount = data.nodes.length;
-    const scaleFactor = Math.max(1, 1 + Math.log10(nodeCount / 40) * 0.4); // Gentle log scale
-    const chargeStrength = PHYSICS.charge * scaleFactor;
-    const linkDist = PHYSICS.linkDistance * Math.min(scaleFactor, 1.5);
-    const collisionPad = PHYSICS.collisionPadding + Math.min((scaleFactor - 1) * 2, 4);
+    const edgeCount = data.edges.length;
+    const edgeDensity = nodeCount > 0 ? edgeCount / nodeCount : 0;
+    // More edges per node = need more repulsion and weaker links
+    const densityFactor = Math.max(1, 1 + (edgeDensity - 2) * 0.25); // baseline at 2 edges/node
+    const sizeFactor = Math.max(1, 1 + Math.log10(Math.max(nodeCount / 40, 1)) * 0.3);
+    const chargeStrength = PHYSICS.charge * sizeFactor * densityFactor;
+    const linkDist = PHYSICS.linkDistance * sizeFactor * Math.max(1, densityFactor * 0.7);
+    const linkStrength = 0.25 / densityFactor; // Weaker links when dense
+    const collisionPad = PHYSICS.collisionPadding + (sizeFactor - 1) * 2 + (densityFactor - 1) * 3;
 
     // Build nodes
     const spread = 0.5;
@@ -154,7 +159,7 @@ export default function ForceGraph({
           .forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
           .distance(linkDist)
-          .strength(0.25),
+          .strength(linkStrength),
       )
       .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength))
       .force('center', d3.forceCenter(width / 2, height / 2))

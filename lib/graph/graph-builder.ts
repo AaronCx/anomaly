@@ -234,16 +234,36 @@ export function buildGraph(files: Map<string, string>): GraphData {
     }
   }
 
+  // Build export edges (reverse of imports — if B imports from A, A exports to B)
+  const exportEdgeMap = new Map<string, number>();
+  for (const [key, weight] of edgeMap) {
+    const [source, target] = key.split('->');
+    // Reverse: target exports to source
+    const exportKey = `${target}->${source}`;
+    // Only add if the target actually has exports
+    const targetParsed = parsedFiles.get(target);
+    if (targetParsed && targetParsed.exports.length > 0) {
+      exportEdgeMap.set(exportKey, (exportEdgeMap.get(exportKey) ?? 0) + weight);
+    }
+  }
+
   const edges: GraphEdge[] = [];
   for (const [key, weight] of edgeMap) {
     const [source, target] = key.split('->');
     edges.push({ source, target, weight, type: 'import' });
   }
+  for (const [key, weight] of exportEdgeMap) {
+    const [source, target] = key.split('->');
+    // Only add if not already covered by an import edge in the same direction
+    if (!edgeMap.has(`${source}->${target}`)) {
+      edges.push({ source, target, weight, type: 'export' });
+    }
+  }
   for (const [key, weight] of callEdgeMap) {
     const [source, target] = key.split('=>');
-    // Only add if not already an import edge (avoid duplicates)
     const hasImportEdge = edgeMap.has(`${source}->${target}`);
-    if (!hasImportEdge) {
+    const hasExportEdge = exportEdgeMap.has(`${source}->${target}`);
+    if (!hasImportEdge && !hasExportEdge) {
       edges.push({ source, target, weight, type: 'call' });
     }
   }

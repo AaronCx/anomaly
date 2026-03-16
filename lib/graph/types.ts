@@ -18,7 +18,7 @@ export interface GraphNode {
   radius?: number;
 }
 
-export type EdgeType = 'import' | 'call';
+export type EdgeType = 'import' | 'export' | 'call';
 
 export interface GraphEdge {
   source: string;

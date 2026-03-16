@@ -15,8 +15,9 @@ const NODE_LEGEND = [
 ];
 
 const EDGE_LEGEND = [
-  { label: 'Import dependency', style: 'solid', color: 'rgba(255,255,255,0.35)', desc: 'File A imports from File B' },
-  { label: 'Function call', style: 'dashed', color: '#fbbf24', desc: 'Function in A calls function in B' },
+  { label: 'Import', style: 'solid', color: '#60a5fa', desc: 'File A pulls from File B' },
+  { label: 'Export', style: 'dotted', color: '#a78bfa', desc: 'File A provides to File B' },
+  { label: 'Function call', style: 'dashed', color: '#fbbf24', desc: 'Cross-file function call' },
 ];
 
 const SIZE_LEGEND = [
@@ -79,15 +80,20 @@ export default function Legend() {
             <div className="flex flex-col gap-2">
               {EDGE_LEGEND.map((item) => (
                 <div key={item.label} className="flex items-center gap-2">
-                  <svg width="24" height="8" className="flex-shrink-0">
+                  <svg width="28" height="8" className="flex-shrink-0">
                     <line
-                      x1="0" y1="4" x2="24" y2="4"
+                      x1="0" y1="4" x2="28" y2="4"
                       stroke={item.color}
                       strokeWidth="2"
-                      strokeDasharray={item.style === 'dashed' ? '4,3' : undefined}
+                      strokeDasharray={
+                        item.style === 'dashed' ? '6,4' :
+                        item.style === 'dotted' ? '2,3' :
+                        undefined
+                      }
                     />
                   </svg>
                   <span className="text-[11px]" style={{ color: COLORS.text }}>{item.label}</span>
+                  <span className="ml-auto text-[10px]" style={{ color: COLORS.textMuted }}>{item.desc}</span>
                 </div>
               ))}
             </div>

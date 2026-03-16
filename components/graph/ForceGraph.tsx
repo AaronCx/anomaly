@@ -281,11 +281,14 @@ export default function ForceGraph({
         }
       }
 
-      const isCallEdge = (link as SimLink & { type?: string }).type === 'call';
+      const edgeType = (link as SimLink & { type?: string }).type;
+      const isCallEdge = edgeType === 'call';
+      const isExportEdge = edgeType === 'export';
 
       if (isCallEdge) {
-        // Function call edges: dashed, amber colored
-        ctx.setLineDash([6, 4]);
+        ctx.setLineDash([6, 4]); // Dashed for function calls
+      } else if (isExportEdge) {
+        ctx.setLineDash([2, 3]); // Dotted for exports
       } else if (!bothVisible) {
         ctx.setLineDash([4, 4]);
         opacity *= 0.3;
@@ -310,7 +313,9 @@ export default function ForceGraph({
       ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
       ctx.strokeStyle = isCallEdge
         ? `rgba(251, 191, 36, ${opacity})`   // Amber for function calls
-        : `rgba(255, 255, 255, ${opacity})`; // White for imports
+        : isExportEdge
+          ? `rgba(167, 139, 250, ${opacity})` // Purple for exports
+          : `rgba(96, 165, 250, ${opacity})`;  // Blue for imports
       ctx.lineWidth = lineWidth;
       ctx.stroke();
 

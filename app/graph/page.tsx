@@ -208,8 +208,12 @@ function GraphPageInner() {
     return () => window.removeEventListener('mousemove', handler);
   }, []);
 
-  const handleNodeClick = useCallback((node: GraphNode) => {
-    setSelectedNode((prev) => (prev?.id === node.id ? null : node));
+  const handleNodeClick = useCallback((node: GraphNode | null) => {
+    if (!node || !node.id) {
+      setSelectedNode(null); // Click on empty space = deselect
+    } else {
+      setSelectedNode(node);
+    }
   }, []);
 
   const handleNodeDoubleClick = useCallback((node: GraphNode) => {

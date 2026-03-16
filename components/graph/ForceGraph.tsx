@@ -495,11 +495,12 @@ export default function ForceGraph({
       canvas.style.cursor = node ? 'pointer' : 'grab';
     };
 
-    // ── Click (only if not a drag) ──
+    // ── Click on empty space (deselect) ──
     const handleClick = (e: MouseEvent) => {
-      if (didDrag) { didDrag = false; return; }
+      // Node clicks are handled by d3.drag end handler
+      // This only handles clicks on empty space
       const node = hitTest(e.offsetX, e.offsetY);
-      if (node && onNodeClick) onNodeClick(node);
+      if (!node && onNodeClick) onNodeClick(null as unknown as GraphNode);
     };
 
     const handleDblClick = (e: MouseEvent) => {

@@ -1,6 +1,6 @@
 import Header from '@/components/layout/Header'
 import AnalysisHeader from '@/components/layout/AnalysisHeader'
-import { TEXT_DIM } from '@/lib/color-schemes'
+import AnalysisViewWrapper from './AnalysisViewWrapper'
 
 interface AnalysisPageProps {
   params: Promise<{ owner: string; repo: string }>
@@ -15,24 +15,12 @@ export default async function AnalysisPage({
   const { id } = await searchParams
 
   return (
-    <div className="min-h-screen">
+    <div className="flex h-screen flex-col">
       <Header />
-      <div className="pt-14">
-        <AnalysisHeader
-          owner={owner}
-          repo={repo}
-        />
-
-        {/* Visualization area placeholder */}
-        <div className="flex min-h-[calc(100vh-14rem)] items-center justify-center">
-          <div className="text-center">
-            <p className="font-mono text-sm" style={{ color: TEXT_DIM }}>
-              {id ? `Analysis ID: ${id}` : 'No analysis ID provided'}
-            </p>
-            <p className="mt-2 text-sm" style={{ color: TEXT_DIM }}>
-              Visualization panels will render here
-            </p>
-          </div>
+      <div className="flex flex-1 flex-col pt-14">
+        <AnalysisHeader owner={owner} repo={repo} />
+        <div className="flex-1">
+          <AnalysisViewWrapper owner={owner} repo={repo} analysisId={id} />
         </div>
       </div>
     </div>

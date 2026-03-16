@@ -198,7 +198,60 @@ function resolveImport(
   // Skip other scoped packages (@org/package)
   if (source.startsWith('@')) return null;
 
-  // Skip bare package names (no ./ or ../ prefix)
+  // Python dotted imports: app.database → app/database
+  // Detect: contains dots but no slashes, doesn't start with . or /
+  // and the importing file is a .py file
+  const isPythonFile = fromFile.endsWith('.py');
+  const looksLikeDottedImport = !source.startsWith('.') && !source.startsWith('/') && !source.includes('/') && source.includes('.');
+
+  if (isPythonFile && looksLikeDottedImport) {
+    const asPath = source.replace(/\./g, '/');
+
+    // Try from the importing file's ancestor directories
+    // e.g., backend/app/services/evals/executor.py importing "app.database"
+    // → try backend/app/database.py
+    const fromParts = fromFile.split('/');
+    for (let i = fromParts.length - 1; i >= 1; i--) {
+      const prefix = fromParts.slice(0, i).join('/');
+      const result = tryResolve(prefix + '/' + asPath, fileMap);
+      if (result) return result;
+    }
+
+    // Try each app root
+    for (const root of appRoots) {
+      const candidate = root ? root + '/' + asPath : asPath;
+      const result = tryResolve(candidate, fileMap);
+      if (result) return result;
+    }
+
+    // Try bare path
+    return tryResolve(asPath, fileMap);
+  }
+
+  // Java dotted imports: com.example.service.UserService → com/example/service/UserService
+  const isJavaFile = fromFile.endsWith('.java');
+  if (isJavaFile && looksLikeDottedImport) {
+    const asPath = source.replace(/\./g, '/');
+    // Try from app roots and ancestors
+    const fromParts = fromFile.split('/');
+    for (let i = fromParts.length - 1; i >= 1; i--) {
+      const prefix = fromParts.slice(0, i).join('/');
+      const result = tryResolve(prefix + '/' + asPath, fileMap);
+      if (result) return result;
+    }
+    for (const root of appRoots) {
+      const candidate = root ? root + '/' + asPath : asPath;
+      const result = tryResolve(candidate, fileMap);
+      if (result) return result;
+    }
+    return tryResolve(asPath, fileMap);
+  }
+
+  // Python relative imports without dots (bare module name)
+  // e.g., "import logging" — these are stdlib, skip
+  if (isPythonFile && !source.startsWith('.')) return null;
+
+  // Skip bare JS/TS package names (no ./ or ../ prefix)
   if (!source.startsWith('.') && !source.startsWith('/')) return null;
 
   // Relative import — resolve from importing file's directory

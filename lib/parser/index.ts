@@ -1,7 +1,5 @@
 import type { ParsedFile } from '@/lib/parser/types';
 import { parseJavaScript } from '@/lib/parser/javascript-parser';
-import { parsePython } from '@/lib/parser/python-parser';
-import { parseJava } from '@/lib/parser/java-parser';
 
 const JS_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx']);
 
@@ -14,14 +12,6 @@ export function parseFile(content: string, filePath: string): ParsedFile {
 
   if (JS_EXTENSIONS.has(ext)) {
     return parseJavaScript(content, filePath);
-  }
-
-  if (ext === '.py') {
-    return parsePython(content, filePath);
-  }
-
-  if (ext === '.java') {
-    return parseJava(content, filePath);
   }
 
   // Unknown extension — return minimal ParsedFile with just LOC

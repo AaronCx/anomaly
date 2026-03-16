@@ -316,6 +316,46 @@ export function buildGraph(files: Map<string, string>): GraphData {
     }
   }
 
+  // Build framework convention edges (implicit dependencies)
+  const allPaths = Array.from(files.keys());
+
+  for (const filePath of allPaths) {
+    // Python: test files implicitly depend on conftest.py in same/parent dirs
+    if (filePath.endsWith('.py') && (filePath.includes('/test') || filePath.includes('tests/'))) {
+      const dir = filePath.slice(0, filePath.lastIndexOf('/'));
+      const parts = dir.split('/');
+      // Walk up directories looking for conftest.py
+      for (let i = parts.length; i >= 1; i--) {
+        const conftest = parts.slice(0, i).join('/') + '/conftest.py';
+        if (files.has(conftest) && conftest !== filePath) {
+          const key = `${filePath}->${conftest}`;
+          if (!edgeMap.has(key)) {
+            edgeMap.set(key, 1);
+          }
+          break; // Use nearest conftest
+        }
+      }
+    }
+
+    // Next.js: page.tsx/route.tsx implicitly depend on layout.tsx in same/parent dirs
+    const fileName = filePath.split('/').pop() || '';
+    if ((fileName === 'page.tsx' || fileName === 'page.jsx' || fileName === 'route.ts' || fileName === 'route.tsx') &&
+        filePath.includes('/app/')) {
+      const dir = filePath.slice(0, filePath.lastIndexOf('/'));
+      const parts = dir.split('/');
+      for (let i = parts.length; i >= 1; i--) {
+        const layoutPath = parts.slice(0, i).join('/') + '/layout.tsx';
+        if (files.has(layoutPath) && layoutPath !== filePath) {
+          const key = `${filePath}->${layoutPath}`;
+          if (!edgeMap.has(key)) {
+            edgeMap.set(key, 1);
+          }
+          break;
+        }
+      }
+    }
+  }
+
   // Build function call edges (cross-file calls)
   const callEdgeMap = new Map<string, number>();
   for (const [filePath, parsed] of parsedFiles) {

@@ -1,82 +1,87 @@
-# Anomaly — Codebase X-Ray & Visual Intelligence Platform
+# Anomaly — Browser-Based Codebase Graph Visualizer
 
-> Point it at any repo. See how the whole thing works in 30 seconds.
+> See how any codebase connects.
 
-A standalone web application that takes any GitHub repo URL, parses its structure using AST analysis, and renders interactive visualizations showing how every function, route, module, and data flow connects. Each node is annotated by an LLM with a one-line plain-English summary.
+Drop a folder or paste a GitHub URL. Anomaly parses the entire codebase in your browser and renders an interactive Obsidian-style force graph showing every file, every import, every function — instantly.
 
-**This is not a linter. This is not a code reviewer. This is a visual understanding tool.**
+**Zero backend. Zero config. Zero API keys required.**
 
 ## Try It Live
 
 **[anomaly-eta.vercel.app](https://anomaly-eta.vercel.app)**
 
-Demo repos pre-loaded: AgentForge, LastGate, Express.js, FastAPI
+Pre-loaded demos: Anomaly (self-referential), AgentForge, LastGate
 
-## What It Does
+## How It Works
 
-### Route Tracer
-Enter an API route path, see every function that executes as a horizontal swimlane diagram. Color-coded by layer: routes (blue), middleware (cyan), services (amber), data access (purple).
+1. **Load** — Drag-and-drop a project folder (File System API, works offline) or paste a GitHub URL (REST API from the browser)
+2. **Parse** — @babel/parser for JS/TS/JSX/TSX, regex for Python/Java — all in the browser
+3. **Build** — Graph data structure from import relationships with cluster detection
+4. **Render** — D3.js force simulation on HTML5 Canvas with Obsidian-style floating nodes
 
-### Module Map
-Bird's-eye force-directed graph of every file and import relationship. Nodes sized by complexity, colored by type, clustered by community detection. Click any file to drill into its function graph.
+## Visual Style
 
-### Call Graph
-Hierarchical view of function-to-function calls with dagre layout. Dead code detection flags unreachable functions. Depth slider (1-5 levels). Click two functions to see the shortest call path.
+Obsidian graph view aesthetic — organic, floaty, alive:
+- **Nodes**: Glowing circles sized by file complexity, colored by type
+- **Edges**: Semi-transparent curved lines, opacity based on connection strength
+- **Physics**: Real force simulation — grab a node and the whole graph responds
+- **Clusters**: Files that depend on each other naturally group together with soft halos
 
-### AI Annotations
-Every node in every view annotated with a one-line plain-English summary via GPT-4o-mini. Loading shimmer while generating. Refresh to regenerate.
+## Features
+
+- **Hover** — Node glows brighter, connected edges highlight, tooltip with file info
+- **Click** — Detail panel slides in with imports, exports, functions, and source code
+- **Double-click** — Zoom into file's internal function graph
+- **Drag** — Spring physics, connected nodes feel the pull
+- **Scroll zoom** — Semantic zoom: labels appear at close range, clusters at distance
+- **Cmd+K search** — Fuzzy search across files, functions, and exports
+- **Filters** — Toggle file types: Components | Routes | Services | Utils | Tests | Config
+- **Minimap** — Overview in the corner with click-to-navigate
+- **AI Annotations** — Optional: enter your own OpenAI key in the UI for per-function summaries
 
 ## Tech Stack
 
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS | Consistent with portfolio stack |
-| Visualization | React Flow + D3.js | React Flow for node graphs, D3 for force-directed layout |
-| AST Parsing | @babel/parser + @babel/traverse | Full JS/TS/JSX/TSX support in Node.js |
-| AI Annotations | OpenAI GPT-4o-mini | Cost-efficient per-function summaries |
-| GitHub Integration | GitHub REST API | Public repos, no auth needed |
-| Deployment | Vercel | Free tier compatible |
+| Layer | Technology |
+|-------|-----------|
+| App | Next.js (App Router), TypeScript, Tailwind CSS |
+| Visualization | D3.js force simulation on HTML5 Canvas |
+| AST Parsing | @babel/parser (JS/TS), regex (Python/Java) |
+| AI (optional) | OpenAI GPT-4o-mini (user provides key) |
+| Deployment | Vercel (static site, zero serverless) |
 
 ## Architecture
 
 ```
-GitHub Repo URL
+User drops folder or enters GitHub URL
       |
       v
-GitHub REST API --> File Tree + Contents
+File Loader (browser) -- File API or GitHub REST API
       |
       v
-@babel/parser --> AST per file
+AST Parser (browser) -- @babel/parser for JS/TS, regex for Python/Java
       |
       v
-Extractors --> imports, exports, functions, calls, routes
+Graph Builder (browser) -- nodes + edges from parsed data
       |
       v
-Graph Builders --> Module Graph | Call Graph | Route Trace
-      |
-      v
-React Flow / D3.js --> Interactive Visualization
-      |
-      v
-OpenAI GPT-4o-mini --> AI Annotations (async)
+D3 Force Graph (canvas) -- Obsidian-style visualization
 ```
 
-### Key Architecture Decisions
+### Why This Architecture
 
-- **No Python backend**: Everything runs in Next.js API routes. Eliminates separate backend deployment, keeps the entire app on Vercel free tier.
-- **In-memory caching**: Analysis results are ephemeral (cleared on cold start). Trade-off: repeat analyses re-parse, but avoids database dependency.
-- **GitHub API over git clone**: Fetches files via REST instead of cloning. Works on Vercel serverless. Trade-off: rate limited to 60 req/hr unauthenticated (set `GITHUB_TOKEN` for 5000/hr).
-- **Babel over tree-sitter**: tree-sitter requires native binaries complex to deploy on Vercel. Babel handles JS/TS/JSX/TSX natively. Trade-off: no Python/Java/Go parsing yet.
+- **Actually deployable** — `vercel deploy` and it works. No cold starts, no sleeping backends.
+- **Works on private repos** — drag-and-drop means no GitHub auth needed. Code never leaves the browser.
+- **Instant** — local parsing is faster than any API round-trip. Sub-second for most repos.
+- **Zero cost** — no backend hosting, no database, no API keys for core functionality.
 
-## Supported Languages & Frameworks
+## Supported Languages
 
 | Language | Parsing | Route Detection |
 |----------|---------|----------------|
-| JavaScript/TypeScript | Full AST | Express, Fastify, Hono |
-| JSX/TSX | Full AST | Next.js App Router, Pages API |
-| Python | Planned | FastAPI, Flask, Django |
-| Java | Planned | Spring Boot |
-| Go | Planned | net/http, Gin |
+| JavaScript/TypeScript | Full AST (@babel/parser) | Express, Next.js, Fastify |
+| JSX/TSX | Full AST | React components |
+| Python | Regex-based | FastAPI, Flask, Django |
+| Java | Regex-based | Spring Boot |
 
 ## Local Development
 
@@ -84,22 +89,26 @@ OpenAI GPT-4o-mini --> AI Annotations (async)
 git clone https://github.com/AaronCx/anomaly.git
 cd anomaly
 bun install
-cp .env.example .env.local
 bun dev
 ```
 
-Optional env vars:
-- `OPENAI_API_KEY` — enables AI annotations
-- `GITHUB_TOKEN` — higher GitHub API rate limits
+No environment variables required. The app runs with zero configuration.
+
+## Generate Demo Data
+
+```bash
+bun scripts/generate-demo.ts /path/to/repo demo-name
+```
+
+Outputs to `public/demos/demo-name.json`.
 
 ## Roadmap
 
-- [ ] Python parser support via tree-sitter WASM
-- [ ] Java/Go parser support
+- [ ] Go/Rust parser support
 - [ ] Private repo support (GitHub OAuth)
 - [ ] VS Code extension
 - [ ] Diff visualization between commits
-- [ ] Persistent caching (Redis/Vercel KV)
+- [ ] Route tracing mode with animated path
 
 ## License
 

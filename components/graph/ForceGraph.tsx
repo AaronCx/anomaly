@@ -602,29 +602,114 @@ export default function ForceGraph({
       }
     };
 
-    // Touch: tap-to-select
+    // Touch: pan, pinch-zoom, tap-to-select, drag nodes
     let touchStartNode: SimNode | null = null;
     let touchMoved = false;
+    let touchPanStart = { x: 0, y: 0 };
+    let touchDragNode: SimNode | null = null;
+    let lastPinchDist = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        // Pinch zoom start — record initial distance
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        lastPinchDist = Math.sqrt(dx * dx + dy * dy);
+        return;
+      }
       if (e.touches.length !== 1) return;
       touchMoved = false;
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
-      touchStartNode = hitTestRef.current?.(touch.clientX - rect.left, touch.clientY - rect.top) ?? null;
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      touchPanStart = { x: touch.clientX, y: touch.clientY };
+
+      const node = hitTestRef.current?.(x, y) ?? null;
+      touchStartNode = node;
+      if (node) {
+        // Start dragging this node
+        touchDragNode = node;
+        touchDragNode.fx = touchDragNode.x;
+        touchDragNode.fy = touchDragNode.y;
+        simRef.current?.alphaTarget(0.1).restart();
+      }
     };
-    const handleTouchMove = () => { touchMoved = true; };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        // Pinch zoom
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (lastPinchDist > 0) {
+          const scaleDelta = dist / lastPinchDist;
+          const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+          const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          const t = transformRef.current;
+          const newK = Math.min(Math.max(t.k * scaleDelta, 0.1), 10);
+          // Zoom centered on pinch midpoint
+          const tx = midX - (midX - t.x) * (newK / t.k);
+          const ty = midY - (midY - t.y) * (newK / t.k);
+          transformRef.current = d3.zoomIdentity.translate(tx, ty).scale(newK);
+          sel.call(zoomBehavior.transform, transformRef.current);
+        }
+        lastPinchDist = dist;
+        touchMoved = true;
+        return;
+      }
+      if (e.touches.length !== 1) return;
+
+      const touch = e.touches[0];
+      const dx = touch.clientX - touchPanStart.x;
+      const dy = touch.clientY - touchPanStart.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) touchMoved = true;
+
+      if (touchDragNode) {
+        // Drag the node
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const t = transformRef.current;
+        touchDragNode.fx = (x - t.x) / t.k;
+        touchDragNode.fy = (y - t.y) / t.k;
+      } else if (touchMoved) {
+        // Pan the canvas
+        const t = transformRef.current;
+        transformRef.current = d3.zoomIdentity
+          .translate(t.x + dx, t.y + dy)
+          .scale(t.k);
+        sel.call(zoomBehavior.transform, transformRef.current);
+        touchPanStart = { x: touch.clientX, y: touch.clientY };
+      }
+    };
+
     const handleTouchEnd = () => {
-      if (touchStartNode && !touchMoved && onNodeClickRef.current) onNodeClickRef.current(touchStartNode);
+      if (touchDragNode) {
+        touchDragNode.fx = null;
+        touchDragNode.fy = null;
+        simRef.current?.alphaTarget(0);
+        // Tap on node (no movement) = click
+        if (!touchMoved && onNodeClickRef.current) {
+          onNodeClickRef.current(touchDragNode);
+        }
+        touchDragNode = null;
+      } else if (!touchMoved && touchStartNode && onNodeClickRef.current) {
+        onNodeClickRef.current(touchStartNode);
+      }
       touchStartNode = null;
+      lastPinchDist = 0;
     };
 
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('dblclick', handleDblClick);
-    canvas.addEventListener('touchstart', handleTouchStart, { passive: true });
-    canvas.addEventListener('touchmove', handleTouchMove, { passive: true });
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', (e: TouchEvent) => {
+      e.preventDefault(); // Prevent browser scroll/zoom
+      handleTouchMove(e);
+    }, { passive: false });
     canvas.addEventListener('touchend', handleTouchEnd);
 
     animFrameRef.current = requestAnimationFrame(draw);

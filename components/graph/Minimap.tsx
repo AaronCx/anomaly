@@ -108,7 +108,7 @@ export default function Minimap({ nodes, viewportRect, bounds, onNavigate, visib
     <canvas
       ref={canvasRef}
       onClick={handleClick}
-      className="fixed bottom-4 right-4 z-30 cursor-crosshair rounded-lg"
+      className="fixed bottom-2 sm:bottom-4 right-2 sm:right-4 z-30 cursor-crosshair rounded-lg hidden sm:block"
       style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT }}
     />
   );

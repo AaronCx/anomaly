@@ -48,7 +48,7 @@ export default function Legend({
   };
 
   return (
-    <div className="fixed top-16 right-4 z-20" style={{ maxWidth: 340 }}>
+    <div className="fixed top-12 sm:top-16 right-2 sm:right-4 z-20" style={{ maxWidth: 320 }}>
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all"

@@ -52,7 +52,7 @@ export default function GraphControls({
   onToggleLabels,
 }: GraphControlsProps) {
   return (
-    <div className="fixed bottom-4 left-4 z-30 flex flex-col items-start gap-2">
+    <div className="fixed bottom-2 sm:bottom-4 left-2 sm:left-4 z-30 flex flex-col items-start gap-1 sm:gap-2">
       {/* Controls */}
       <div className="flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/80 p-1 backdrop-blur-md">
         <ControlButton onClick={onZoomIn} title="Zoom in">

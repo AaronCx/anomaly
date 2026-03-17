@@ -11,108 +11,13 @@ import FilterBar from '@/components/graph/FilterBar';
 import GraphControls from '@/components/graph/GraphControls';
 import Minimap from '@/components/graph/Minimap';
 import Legend from '@/components/graph/Legend';
-import { parseFile } from '@/lib/parser';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
-import type { ParsedFile } from '@/lib/parser/types';
+import { buildGraph } from '@/lib/graph/graph-builder';
 import type { GraphData, GraphNode, FileType, EdgeType } from '@/lib/graph/types';
-import { classifyFileType } from '@/lib/utils';
+import { DEFAULT_EDGE_COLORS } from '@/components/graph/Legend';
 import { FILE_TYPE_COLORS } from '@/lib/constants';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
 import { useSearch } from '@/hooks/useSearch';
-
-/** Convert parsed files into graph data */
-function buildGraph(parsed: ParsedFile[]): GraphData {
-  const nodes = parsed.map((f) => {
-    const fileType = classifyFileType(f.filePath);
-    return {
-      id: f.filePath,
-      filePath: f.filePath,
-      label: f.filePath.split('/').pop() ?? f.filePath,
-      fileType,
-      loc: f.loc,
-      complexity: f.functions.length + f.calls.length,
-      imports: f.imports.map((i) => i.source),
-      exports: f.exports,
-      functions: f.functions,
-    };
-  });
-
-  const nodeIds = new Set(nodes.map((n) => n.id));
-
-  // Build edges from imports
-  const edgeMap = new Map<string, number>();
-  for (const file of parsed) {
-    for (const imp of file.imports) {
-      const resolved = resolveImport(imp.source, file.filePath, nodeIds);
-      if (resolved) {
-        const key = `${file.filePath}|${resolved}`;
-        edgeMap.set(key, (edgeMap.get(key) ?? 0) + 1);
-      }
-    }
-  }
-
-  const edges = Array.from(edgeMap.entries()).map(([key, weight]) => {
-    const [source, target] = key.split('|');
-    return { source, target, weight, type: 'import' as const };
-  });
-
-  // Build clusters by directory
-  const clusterMap = new Map<string, string[]>();
-  for (const node of nodes) {
-    const dir = node.filePath.includes('/')
-      ? node.filePath.split('/').slice(0, -1).join('/')
-      : '.';
-    if (!clusterMap.has(dir)) clusterMap.set(dir, []);
-    clusterMap.get(dir)!.push(node.id);
-  }
-
-  const clusterColors = Object.values(FILE_TYPE_COLORS);
-  const clusters = Array.from(clusterMap.entries()).map(
-    ([dir, ids], i) => ({
-      id: dir,
-      label: dir,
-      color: clusterColors[i % clusterColors.length],
-      nodeIds: ids,
-    }),
-  );
-
-  return { nodes, edges, clusters };
-}
-
-/** Try to resolve a relative/alias import to a file in the codebase */
-function resolveImport(
-  source: string,
-  fromFile: string,
-  nodeIds: Set<string>,
-): string | null {
-  if (!source.startsWith('.') && !source.startsWith('@/') && !source.startsWith('~/')) {
-    return null;
-  }
-
-  let resolved = source;
-  if (source.startsWith('@/')) {
-    resolved = source.slice(2);
-  } else if (source.startsWith('~/')) {
-    resolved = source.slice(2);
-  } else {
-    const fromDir = fromFile.includes('/')
-      ? fromFile.split('/').slice(0, -1).join('/')
-      : '.';
-    const parts = fromDir.split('/');
-    for (const seg of source.split('/')) {
-      if (seg === '..') parts.pop();
-      else if (seg !== '.') parts.push(seg);
-    }
-    resolved = parts.join('/');
-  }
-
-  const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
-  for (const ext of extensions) {
-    if (nodeIds.has(resolved + ext)) return resolved + ext;
-  }
-
-  return null;
-}
 
 function GraphPageInner() {
   const searchParams = useSearchParams();
@@ -132,14 +37,20 @@ function GraphPageInner() {
   const [showMinimap, setShowMinimap] = useState(true);
   const [showLabels, setShowLabels] = useState(false);
   const [nodeColors, setNodeColors] = useState<Record<FileType, string>>({ ...FILE_TYPE_COLORS });
+  const [edgeColors, setEdgeColors] = useState<Record<EdgeType, string>>({ ...DEFAULT_EDGE_COLORS });
   const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(new Set(['import', 'export', 'call']));
 
   const handleNodeColorChange = useCallback((fileType: FileType, color: string) => {
     setNodeColors((prev) => ({ ...prev, [fileType]: color }));
   }, []);
 
+  const handleEdgeColorChange = useCallback((edgeType: EdgeType, color: string) => {
+    setEdgeColors((prev) => ({ ...prev, [edgeType]: color }));
+  }, []);
+
   const handleResetColors = useCallback(() => {
     setNodeColors({ ...FILE_TYPE_COLORS });
+    setEdgeColors({ ...DEFAULT_EDGE_COLORS });
   }, []);
 
   const handleToggleEdgeType = useCallback((edgeType: EdgeType) => {
@@ -199,12 +110,7 @@ function GraphPageInner() {
         setFileCount(files.size);
         setFileContents(files);
 
-        const parsed: ParsedFile[] = [];
-        for (const [path, content] of files) {
-          parsed.push(parseFile(content, path));
-        }
-
-        const data = buildGraph(parsed);
+        const data = buildGraph(files);
         if (!cancelled) {
           setGraphData(data);
           setLoading(false);
@@ -289,6 +195,7 @@ function GraphPageInner() {
         searchHighlight={highlightedNodeId}
         showLabels={showLabels}
         nodeColors={nodeColors}
+        edgeColors={edgeColors}
         visibleEdgeTypes={visibleEdgeTypes}
       />
 
@@ -341,6 +248,8 @@ function GraphPageInner() {
       <Legend
         nodeColors={nodeColors}
         onNodeColorChange={handleNodeColorChange}
+        edgeColors={edgeColors}
+        onEdgeColorChange={handleEdgeColorChange}
         onResetColors={handleResetColors}
         visibleEdgeTypes={visibleEdgeTypes}
         onToggleEdgeType={handleToggleEdgeType}

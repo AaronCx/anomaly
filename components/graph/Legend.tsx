@@ -16,35 +16,53 @@ const NODE_ITEMS: { key: FileType; label: string }[] = [
   { key: 'config', label: 'Config' },
 ];
 
-const EDGE_ITEMS: { key: EdgeType; label: string; style: string; defaultColor: string }[] = [
-  { key: 'import', label: 'Import', style: 'solid', defaultColor: '#60a5fa' },
-  { key: 'export', label: 'Export', style: 'dotted', defaultColor: '#a78bfa' },
-  { key: 'call', label: 'Function call', style: 'dashed', defaultColor: '#fbbf24' },
+const DEFAULT_EDGE_COLORS: Record<EdgeType, string> = {
+  import: '#60a5fa',
+  export: '#a78bfa',
+  call: '#fbbf24',
+};
+
+const EDGE_ITEMS: { key: EdgeType; label: string; style: string }[] = [
+  { key: 'import', label: 'Import', style: 'solid' },
+  { key: 'export', label: 'Connected files', style: 'dotted' },
+  { key: 'call', label: 'Function call', style: 'dashed' },
 ];
 
 interface LegendProps {
   nodeColors: Record<FileType, string>;
   onNodeColorChange: (fileType: FileType, color: string) => void;
+  edgeColors: Record<EdgeType, string>;
+  onEdgeColorChange: (edgeType: EdgeType, color: string) => void;
   onResetColors: () => void;
   visibleEdgeTypes: Set<EdgeType>;
   onToggleEdgeType: (edgeType: EdgeType) => void;
 }
 
+export { DEFAULT_EDGE_COLORS };
+
 export default function Legend({
   nodeColors,
   onNodeColorChange,
+  edgeColors,
+  onEdgeColorChange,
   onResetColors,
   visibleEdgeTypes,
   onToggleEdgeType,
 }: LegendProps) {
   const [open, setOpen] = useState(false);
   const [editingColor, setEditingColor] = useState<FileType | null>(null);
+  const [editingEdgeColor, setEditingEdgeColor] = useState<EdgeType | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
+  const edgeColorInputRef = useRef<HTMLInputElement>(null);
 
   const handleColorClick = (key: FileType) => {
     setEditingColor(key);
-    // Delay to let the hidden input render
     setTimeout(() => colorInputRef.current?.click(), 50);
+  };
+
+  const handleEdgeColorClick = (key: EdgeType) => {
+    setEditingEdgeColor(key);
+    setTimeout(() => edgeColorInputRef.current?.click(), 50);
   };
 
   return (
@@ -63,7 +81,7 @@ export default function Legend({
         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
       </button>
 
-      {/* Hidden color picker input */}
+      {/* Hidden color picker inputs */}
       <input
         ref={colorInputRef}
         type="color"
@@ -72,6 +90,16 @@ export default function Legend({
         value={editingColor ? nodeColors[editingColor] : '#000000'}
         onChange={(e) => {
           if (editingColor) onNodeColorChange(editingColor, e.target.value);
+        }}
+      />
+      <input
+        ref={edgeColorInputRef}
+        type="color"
+        className="absolute opacity-0 pointer-events-none"
+        style={{ width: 0, height: 0 }}
+        value={editingEdgeColor ? edgeColors[editingEdgeColor] : '#000000'}
+        onChange={(e) => {
+          if (editingEdgeColor) onEdgeColorChange(editingEdgeColor, e.target.value);
         }}
       />
 
@@ -132,36 +160,39 @@ export default function Legend({
             <div className="flex flex-col gap-2">
               {EDGE_ITEMS.map((item) => {
                 const isVisible = visibleEdgeTypes.has(item.key);
+                const color = edgeColors[item.key];
                 return (
-                  <button
-                    key={item.key}
-                    onClick={() => onToggleEdgeType(item.key)}
-                    className="flex items-center gap-2 w-full text-left transition-opacity"
-                    style={{ opacity: isVisible ? 1 : 0.35 }}
-                  >
-                    <svg width="28" height="8" className="flex-shrink-0">
-                      <line
-                        x1="0" y1="4" x2="28" y2="4"
-                        stroke={item.defaultColor}
-                        strokeWidth="2"
-                        strokeDasharray={
-                          item.style === 'dashed' ? '6,4' :
-                          item.style === 'dotted' ? '2,3' :
-                          undefined
-                        }
-                      />
-                    </svg>
-                    <span className="text-[11px]" style={{ color: COLORS.text }}>{item.label}</span>
-                    <span
-                      className="ml-auto text-[9px] font-medium rounded px-1.5 py-0.5"
+                  <div key={item.key} className="flex items-center gap-2 transition-opacity" style={{ opacity: isVisible ? 1 : 0.35 }}>
+                    <button
+                      onClick={() => handleEdgeColorClick(item.key)}
+                      className="flex-shrink-0 cursor-pointer transition-transform hover:scale-125"
+                      title="Click to change color"
+                    >
+                      <svg width="28" height="8">
+                        <line
+                          x1="0" y1="4" x2="28" y2="4"
+                          stroke={color}
+                          strokeWidth="2.5"
+                          strokeDasharray={
+                            item.style === 'dashed' ? '6,4' :
+                            item.style === 'dotted' ? '2,3' :
+                            undefined
+                          }
+                        />
+                      </svg>
+                    </button>
+                    <span className="text-[11px] flex-1" style={{ color: COLORS.text }}>{item.label}</span>
+                    <button
+                      onClick={() => onToggleEdgeType(item.key)}
+                      className="text-[9px] font-medium rounded px-1.5 py-0.5 flex-shrink-0 cursor-pointer"
                       style={{
                         background: isVisible ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
                         color: isVisible ? COLORS.text : COLORS.textMuted,
                       }}
                     >
                       {isVisible ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
             </div>

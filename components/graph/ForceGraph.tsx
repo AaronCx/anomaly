@@ -37,6 +37,7 @@ export interface ForceGraphProps {
   showLabels?: boolean;
   showMinimap?: boolean;
   nodeColors?: Record<FileType, string>;
+  edgeColors?: Record<string, string>;
   visibleEdgeTypes?: Set<string>;
 }
 
@@ -74,6 +75,7 @@ export default function ForceGraph({
   onNodeHover,
   hoveredNodeId: externalHoveredId,
   nodeColors: customNodeColors,
+  edgeColors: customEdgeColors,
   visibleEdgeTypes,
   selectedNodeId,
   filters,
@@ -344,11 +346,10 @@ export default function ForceGraph({
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
-      ctx.strokeStyle = isCallEdge
-        ? `rgba(251, 191, 36, ${opacity})`   // Amber for function calls
-        : isExportEdge
-          ? `rgba(167, 139, 250, ${opacity})` // Purple for exports
-          : `rgba(96, 165, 250, ${opacity})`;  // Blue for imports
+      // Use custom edge colors if provided, otherwise defaults
+      const eType = isCallEdge ? 'call' : isExportEdge ? 'export' : 'import';
+      const edgeHex = customEdgeColors?.[eType] || (isCallEdge ? '#fbbf24' : isExportEdge ? '#a78bfa' : '#60a5fa');
+      ctx.strokeStyle = hexToRGBA(edgeHex, opacity);
       ctx.lineWidth = lineWidth;
       ctx.stroke();
 
@@ -456,7 +457,7 @@ export default function ForceGraph({
     ctx.restore();
 
     animFrameRef.current = requestAnimationFrame(drawRef.current);
-  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, visibleEdgeTypes]);
+  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes]);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */

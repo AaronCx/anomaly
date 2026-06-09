@@ -22,7 +22,8 @@ export function parseRepoUrl(
     /(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)/.exec(
       trimmed,
     );
-  if (urlMatch) return { owner: urlMatch[1], repo: urlMatch[2] };
+  if (urlMatch)
+    return { owner: urlMatch[1], repo: urlMatch[2].replace(/\.git$/, '') };
 
   return null;
 }

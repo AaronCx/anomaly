@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useState, useCallback, useMemo, Suspense } from 'react';
 import LoadingGraph from '@/components/shared/LoadingGraph';
 import ForceGraph from '@/components/graph/ForceGraph';
 import NodeTooltip from '@/components/graph/NodeTooltip';
@@ -13,12 +13,15 @@ import Minimap from '@/components/graph/Minimap';
 import Legend from '@/components/graph/Legend';
 import { DriftPanel } from '@/components/graph/DriftPanel';
 import { Timeline } from '@/components/graph/Timeline';
+import { TracePanel } from '@/components/graph/TracePanel';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import { buildGraph } from '@/lib/graph/graph-builder';
 import { loadHistory } from '@/lib/history/snapshots';
 import type { Snapshot } from '@/lib/history/types';
 import type { GraphData, GraphNode, FileType, EdgeType } from '@/lib/graph/types';
-import { History, Loader2 } from 'lucide-react';
+import type { AgentTrace } from '@/lib/trace/types';
+import { buildReplay, countResolved } from '@/lib/trace/replay';
+import { History, Loader2, Route } from 'lucide-react';
 import { DEFAULT_EDGE_COLORS } from '@/components/graph/Legend';
 import { FILE_TYPE_COLORS } from '@/lib/constants';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
@@ -55,6 +58,12 @@ function GraphPageInner() {
   const [playing, setPlaying] = useState(false);
   const [sampleCount, setSampleCount] = useState(12);
   const [historyProgress, setHistoryProgress] = useState<{ loaded: number; total: number }>({ loaded: 0, total: 0 });
+
+  // Agent-trace overlay mode — replay an imported run on the graph.
+  const [traceMode, setTraceMode] = useState(false);
+  const [trace, setTrace] = useState<AgentTrace | null>(null);
+  const [traceIndex, setTraceIndex] = useState(0);
+  const [tracePlaying, setTracePlaying] = useState(false);
 
   const handleNodeColorChange = useCallback((fileType: FileType, color: string) => {
     setNodeColors((prev) => ({ ...prev, [fileType]: color }));
@@ -241,12 +250,46 @@ function GraphPageInner() {
     setPlaying((p) => !p);
   }, []);
 
+  // ── Trace mode ──────────────────────────────────────────
+  const handleToggleTrace = useCallback(() => {
+    setTraceMode((on) => {
+      const next = !on;
+      // Leaving trace mode stops playback; the graph view returns to normal.
+      if (!next) setTracePlaying(false);
+      return next;
+    });
+  }, []);
+
+  const handleLoadTrace = useCallback((next: AgentTrace | null) => {
+    setTrace(next);
+    setTraceIndex(0);
+    setTracePlaying(false);
+  }, []);
+
+  const handleTraceScrub = useCallback((i: number) => setTraceIndex(i), []);
+  const handleToggleTracePlay = useCallback(() => setTracePlaying((p) => !p), []);
+
   // The graph rendered: the active snapshot when in history mode, else the
   // normal single-snapshot graph. Default behaviour is unchanged when off.
   const activeGraph: GraphData | null =
     historyMode && snapshots.length > 0
       ? snapshots[Math.min(snapshotIndex, snapshots.length - 1)]?.graph ?? graphData
       : graphData;
+
+  // Replay states for the loaded trace against the currently-rendered graph.
+  // Deterministic + memoised, so scrubbing is O(1).
+  const replayStates = useMemo(
+    () => (traceMode && trace && activeGraph ? buildReplay(trace, activeGraph) : []),
+    [traceMode, trace, activeGraph],
+  );
+  const traceResolvedCount = useMemo(
+    () => (traceMode && trace && activeGraph ? countResolved(trace, activeGraph) : 0),
+    [traceMode, trace, activeGraph],
+  );
+  const traceState =
+    replayStates.length > 0
+      ? replayStates[Math.min(traceIndex, replayStates.length - 1)]
+      : null;
 
   if (error) {
     return (
@@ -281,6 +324,12 @@ function GraphPageInner() {
         visibleEdgeTypes={visibleEdgeTypes}
         historyMode={historyMode}
         churn={churn}
+        traceMode={traceMode}
+        traceActiveId={traceState?.active ?? null}
+        traceReadIds={traceState?.read ?? null}
+        traceModifiedIds={traceState?.modified ?? null}
+        traceDeletedIds={traceState?.deleted ?? null}
+        tracePath={traceState?.path ?? null}
       />
 
       {/* Architecture drift panel (only when a .anomaly.yml was loaded) */}
@@ -340,8 +389,39 @@ function GraphPageInner() {
         </div>
       )}
 
+      {/* Agent-trace overlay toggle (always available — works on any graph) */}
+      <div className={`absolute z-30 ${historyAvailable ? 'top-16' : 'top-4'} left-4 flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/90 px-2 py-1.5 backdrop-blur`}>
+        <button
+          type="button"
+          onClick={handleToggleTrace}
+          title={traceMode ? 'Exit trace mode' : 'Replay an agent run on the graph'}
+          className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+            traceMode
+              ? 'bg-white/10 text-[var(--color-text)]'
+              : 'text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)]'
+          }`}
+        >
+          <Route size={14} />
+          Trace
+        </button>
+      </div>
+
+      {/* Trace overlay loader + step player (trace mode only) */}
+      {traceMode && (
+        <TracePanel
+          trace={trace}
+          states={replayStates}
+          index={Math.min(traceIndex, Math.max(replayStates.length - 1, 0))}
+          onIndexChange={handleTraceScrub}
+          playing={tracePlaying}
+          onTogglePlay={handleToggleTracePlay}
+          onLoadTrace={handleLoadTrace}
+          resolvedCount={traceResolvedCount}
+        />
+      )}
+
       {/* Timeline scrubber (history mode) */}
-      {historyMode && snapshots.length > 0 && (
+      {!traceMode && historyMode && snapshots.length > 0 && (
         <Timeline
           snapshots={snapshots}
           index={Math.min(snapshotIndex, snapshots.length - 1)}

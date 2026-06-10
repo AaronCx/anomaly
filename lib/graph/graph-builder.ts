@@ -2,6 +2,8 @@ import type { FileType, GraphData, GraphEdge, GraphNode } from '@/lib/graph/type
 import { parseFile } from '@/lib/parser/index';
 import type { ParsedFile } from '@/lib/parser/types';
 import { detectClusters } from '@/lib/graph/cluster-detection';
+import { parseArchitectureRules, RULES_FILE } from '@/lib/rules/parse';
+import { checkArchitecture, violationKey } from '@/lib/rules/check';
 
 /**
  * Classify a file into a FileType based on path heuristics.
@@ -410,5 +412,27 @@ export function buildGraph(files: Map<string, string>): GraphData {
   // Detect clusters
   const clusters = detectClusters(nodes);
 
-  return { nodes, edges, clusters };
+  const data: GraphData = { nodes, edges, clusters };
+
+  // Apply architecture rules from .anomaly.yml, if present, annotating
+  // violating edges and attaching a drift report.
+  const rulesText = files.get(RULES_FILE);
+  if (rulesText) {
+    try {
+      const rules = parseArchitectureRules(rulesText);
+      if (rules && rules.layers.length + rules.forbidden.length > 0) {
+        const report = checkArchitecture(data, rules);
+        const byKey = new Map(report.violations.map((v) => [violationKey(v), v]));
+        for (const edge of edges) {
+          const v = byKey.get(violationKey(edge));
+          if (v) edge.violation = v;
+        }
+        data.drift = report;
+      }
+    } catch {
+      // Malformed .anomaly.yml: skip rule checking rather than break the graph.
+    }
+  }
+
+  return data;
 }

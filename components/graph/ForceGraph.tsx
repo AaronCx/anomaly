@@ -23,6 +23,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   target: SimNode | string;
   weight: number;
   type?: string;
+  violation?: GraphEdge['violation'];
 }
 
 export interface ForceGraphProps {
@@ -147,6 +148,7 @@ export default function ForceGraph({
         target: e.target,
         weight: e.weight,
         type: e.type,
+        violation: e.violation,
       }));
     linksRef.current = allLinks;
 
@@ -319,8 +321,11 @@ export default function ForceGraph({
       const edgeType = (link as SimLink & { type?: string }).type;
       const isCallEdge = edgeType === 'call';
       const isExportEdge = edgeType === 'export';
+      const isViolation = !!(link as SimLink & { violation?: unknown }).violation;
 
-      if (isCallEdge) {
+      if (isViolation) {
+        ctx.setLineDash([]); // Violations render solid + red, always prominent
+      } else if (isCallEdge) {
         ctx.setLineDash([6, 4]); // Dashed for function calls
       } else if (isExportEdge) {
         ctx.setLineDash([2, 3]); // Dotted for exports
@@ -333,6 +338,7 @@ export default function ForceGraph({
 
       // Scale opacity by weight
       opacity = Math.min(opacity * (1 + link.weight * 0.15), 0.6);
+      if (isViolation) opacity = Math.max(opacity, 0.85); // keep violations visible
 
       // Quadratic bezier with slight curve
       const mx = (s.x + t2.x) / 2;
@@ -346,11 +352,14 @@ export default function ForceGraph({
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
-      // Use custom edge colors if provided, otherwise defaults
+      // Use custom edge colors if provided, otherwise defaults.
+      // Architecture-rule violations always render red and a touch thicker.
       const eType = isCallEdge ? 'call' : isExportEdge ? 'export' : 'import';
-      const edgeHex = customEdgeColors?.[eType] || (isCallEdge ? '#fbbf24' : isExportEdge ? '#a78bfa' : '#60a5fa');
+      const edgeHex = isViolation
+        ? '#ef4444'
+        : customEdgeColors?.[eType] || (isCallEdge ? '#fbbf24' : isExportEdge ? '#a78bfa' : '#60a5fa');
       ctx.strokeStyle = hexToRGBA(edgeHex, opacity);
-      ctx.lineWidth = lineWidth;
+      ctx.lineWidth = isViolation ? lineWidth + 1 : lineWidth;
       ctx.stroke();
 
       // Arrow indicator at 70% along the curve

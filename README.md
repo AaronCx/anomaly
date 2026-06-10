@@ -37,7 +37,33 @@ Obsidian graph view aesthetic — organic, floaty, alive:
 - **Cmd+K search** — Fuzzy search across files, functions, and exports
 - **Filters** — Toggle file types: Components | Routes | Services | Utils | Tests | Config
 - **Minimap** — Overview in the corner with click-to-navigate
+- **Architecture rules** — Drop a `.anomaly.yml` in the scanned repo to declare intended layers and forbidden imports; violations render as red edges with a live drift score (see below)
 - **AI Annotations** — Optional: enter your own OpenAI key in the UI for per-function summaries
+
+### Architecture rules & drift detection
+
+Declare your intended architecture in a `.anomaly.yml` at the repo root. Layers
+are an ordered list, top to bottom — a layer may depend on layers *below* it,
+never above. Backward dependencies and forbidden imports are drawn as red edges,
+and the **Architecture** panel shows a drift score (the share of checked
+dependencies that break the rules).
+
+```yaml
+# .anomaly.yml
+layers:
+  - name: ui
+    paths: ["app", "components"]
+  - name: logic
+    paths: ["lib/graph", "lib/parser", "lib/loader", "lib/rules"]
+  - name: foundation
+    paths: ["lib/constants.ts", "lib/utils.ts"]
+forbidden:
+  - from: components      # components must not reach the loaders directly
+    to: lib/loader
+allow:
+  - from: app             # but the app shell may
+    to: lib/loader
+```
 
 ## Tech Stack
 

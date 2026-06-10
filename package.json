@@ -15,6 +15,7 @@
     "@types/babel__traverse": "^7.28.0",
     "clsx": "^2.1.1",
     "d3": "^7.9.0",
+    "js-yaml": "^4.2.0",
     "lucide-react": "^0.577.0",
     "next": "16.2.5",
     "react": "19.2.3",
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/d3": "^7.4.3",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

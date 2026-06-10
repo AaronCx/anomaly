@@ -1,0 +1,20 @@
+# Anomaly's own architecture rules — dogfood the drift detector by scanning
+# this repo. Layers run top to bottom: a layer may depend on layers below it,
+# never above.
+layers:
+  - name: ui
+    paths: ["app", "components", "hooks"]
+  - name: logic
+    paths: ["lib/graph", "lib/parser", "lib/loader", "lib/rules", "lib/ai"]
+  - name: foundation
+    paths: ["lib/constants.ts", "lib/utils.ts"]
+
+forbidden:
+  # UI components should reach data through lib/graph, not the raw loaders.
+  - from: components
+    to: lib/loader
+
+allow:
+  # The app shell wires up loading, so it's allowed to call the loaders.
+  - from: app
+    to: lib/loader

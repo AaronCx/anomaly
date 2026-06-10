@@ -94,9 +94,20 @@ export class NodeIndex {
     const exact = this.byPath.get(norm);
     if (exact) return exact;
 
-    // Suffix match: the trace path ends with a known node path, or vice versa.
-    for (const [path, id] of this.byPath) {
-      if (path.endsWith('/' + norm) || norm.endsWith('/' + path)) return id;
+    // Suffix match: the trace path and a node path share a multi-segment tail
+    // (one is rooted deeper than the other). Only for path-shaped inputs — a
+    // bare basename must go through the unambiguous-basename fallback below so
+    // collisions aren't silently resolved. Require a unique suffix match too.
+    if (norm.includes('/')) {
+      let match: string | null = null;
+      let ambiguous = false;
+      for (const [path, id] of this.byPath) {
+        if (path.endsWith('/' + norm) || norm.endsWith('/' + path)) {
+          if (match && match !== id) ambiguous = true;
+          match = id;
+        }
+      }
+      if (match && !ambiguous) return match;
     }
 
     const base = basename(norm);

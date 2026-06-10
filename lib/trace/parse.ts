@@ -208,8 +208,8 @@ export function adaptForgeRunLog(input: unknown): AgentTrace {
   const steps: TraceStep[] = [];
 
   for (let i = 0; i < events.length; i++) {
-    const ev = events[i];
-    if (!isObject(ev)) continue;
+    const ev: ForgeEvent = events[i];
+    if (typeof ev !== 'object' || ev === null) continue;
     // Only tool-call events touch files. Forge labels them "tool" / "tool_call".
     const isToolEvent =
       ev.type === undefined ||
@@ -273,8 +273,8 @@ export interface ClaudeContentBlock {
   input?: Record<string, unknown>;
 }
 
-function pathFromClaudeInput(input: Record<string, unknown> | undefined): string | undefined {
-  if (!input) return undefined;
+function pathFromClaudeInput(input: unknown): string | undefined {
+  if (!isObject(input)) return undefined;
   const candidates = [input.file_path, input.path, input.filePath, input.notebook_path];
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim() !== '') return c;
@@ -282,10 +282,8 @@ function pathFromClaudeInput(input: Record<string, unknown> | undefined): string
   return undefined;
 }
 
-function diffRangeFromClaudeInput(
-  input: Record<string, unknown> | undefined,
-): DiffRange | undefined {
-  if (!input) return undefined;
+function diffRangeFromClaudeInput(input: unknown): DiffRange | undefined {
+  if (!isObject(input)) return undefined;
   // Explicit range first.
   const explicit = coerceDiffRange(input.range ?? input.diffRange);
   if (explicit) return explicit;

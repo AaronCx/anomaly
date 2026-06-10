@@ -40,6 +40,10 @@ export interface ForceGraphProps {
   nodeColors?: Record<FileType, string>;
   edgeColors?: Record<string, string>;
   visibleEdgeTypes?: Set<string>;
+  /** When true, render churn heat (warm glow on frequently-changed nodes). */
+  historyMode?: boolean;
+  /** Per-file churn heat in [0, 1], keyed by file path. Used when historyMode. */
+  churn?: Map<string, number> | null;
 }
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -82,6 +86,8 @@ export default function ForceGraph({
   filters,
   searchHighlight,
   showLabels: forceShowLabels,
+  historyMode,
+  churn,
 }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -408,6 +414,24 @@ export default function ForceGraph({
         alpha *= 0.3;
       }
 
+      // Churn heat: in history mode, frequently-changed files glow hot. The
+      // warm halo is drawn under the node and scales with the file's heat.
+      const heat = historyMode && churn ? (churn.get(node.filePath) ?? 0) : 0;
+      if (heat > 0) {
+        const pulse = 0.85 + 0.15 * Math.sin(pulseRef.current + node._phase);
+        const heatRadius = r * (2.2 + heat * 2.4) * pulse;
+        const heatGrad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, heatRadius);
+        // Hot files trend orange→red; cooler ones stay amber.
+        const heatHex = heat > 0.66 ? '#ef4444' : heat > 0.33 ? '#f97316' : '#fbbf24';
+        heatGrad.addColorStop(0, hexToRGBA(heatHex, 0.5 * heat * alpha));
+        heatGrad.addColorStop(0.5, hexToRGBA(heatHex, 0.22 * heat * alpha));
+        heatGrad.addColorStop(1, hexToRGBA(heatHex, 0));
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, heatRadius, 0, Math.PI * 2);
+        ctx.fillStyle = heatGrad;
+        ctx.fill();
+      }
+
       // Glow gradient
       const glowRadius = node.id === hovered ? r * 2.5 : node.id === selectedNodeId ? r * 3 : r * 1.8;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
@@ -466,7 +490,7 @@ export default function ForceGraph({
     ctx.restore();
 
     animFrameRef.current = requestAnimationFrame(drawRef.current);
-  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes]);
+  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes, historyMode, churn]);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */

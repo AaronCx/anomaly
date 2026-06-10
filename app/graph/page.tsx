@@ -12,9 +12,13 @@ import GraphControls from '@/components/graph/GraphControls';
 import Minimap from '@/components/graph/Minimap';
 import Legend from '@/components/graph/Legend';
 import { DriftPanel } from '@/components/graph/DriftPanel';
+import { Timeline } from '@/components/graph/Timeline';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import { buildGraph } from '@/lib/graph/graph-builder';
+import { loadHistory } from '@/lib/history/snapshots';
+import type { Snapshot } from '@/lib/history/types';
 import type { GraphData, GraphNode, FileType, EdgeType } from '@/lib/graph/types';
+import { History, Loader2 } from 'lucide-react';
 import { DEFAULT_EDGE_COLORS } from '@/components/graph/Legend';
 import { FILE_TYPE_COLORS } from '@/lib/constants';
 import { useGraphFilters } from '@/hooks/useGraphFilters';
@@ -40,6 +44,17 @@ function GraphPageInner() {
   const [nodeColors, setNodeColors] = useState<Record<FileType, string>>({ ...FILE_TYPE_COLORS });
   const [edgeColors, setEdgeColors] = useState<Record<EdgeType, string>>({ ...DEFAULT_EDGE_COLORS });
   const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(new Set(['import', 'export', 'call']));
+
+  // History (git-timeline) mode — only available when a GitHub repo is loaded.
+  const [historyMode, setHistoryMode] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [churn, setChurn] = useState<Map<string, number> | null>(null);
+  const [snapshotIndex, setSnapshotIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [sampleCount, setSampleCount] = useState(12);
+  const [historyProgress, setHistoryProgress] = useState<{ loaded: number; total: number }>({ loaded: 0, total: 0 });
 
   const handleNodeColorChange = useCallback((fileType: FileType, color: string) => {
     setNodeColors((prev) => ({ ...prev, [fileType]: color }));
@@ -167,6 +182,72 @@ function GraphPageInner() {
     window.dispatchEvent(new CustomEvent('anomaly:zoom', { detail: { direction: 'fit' } }));
   }, []);
 
+  // History mode is only meaningful for GitHub repos (we walk their commits).
+  const historyAvailable = !!repo && !demo && local !== 'true';
+
+  // Load the timeline: sample commits, build a graph per snapshot, compute churn.
+  const loadTimeline = useCallback(async () => {
+    if (!repo) return;
+    const [owner, repoName] = repo.split('/');
+    if (!owner || !repoName) return;
+
+    setHistoryLoading(true);
+    setHistoryError(null);
+    setHistoryProgress({ loaded: 0, total: sampleCount });
+    try {
+      const token = typeof window !== 'undefined'
+        ? localStorage.getItem('anomaly:gh-token') ?? undefined
+        : undefined;
+      const { snapshots: snaps, churn: churnMap } = await loadHistory({
+        owner,
+        repo: repoName,
+        token,
+        sampleCount,
+        onProgress: (p) =>
+          setHistoryProgress({ loaded: p.snapshotsLoaded, total: p.totalSnapshots }),
+      });
+      const heat = new Map<string, number>();
+      for (const [path, c] of churnMap) heat.set(path, c.heat);
+      setSnapshots(snaps);
+      setChurn(heat);
+      setSnapshotIndex(snaps.length > 0 ? snaps.length - 1 : 0);
+      setHistoryMode(true);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : 'Failed to load history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [repo, sampleCount]);
+
+  const handleToggleHistory = useCallback(() => {
+    if (historyMode) {
+      // Turn off: revert to the single-snapshot view.
+      setHistoryMode(false);
+      setPlaying(false);
+      return;
+    }
+    if (snapshots.length > 0) {
+      setHistoryMode(true);
+    } else {
+      void loadTimeline();
+    }
+  }, [historyMode, snapshots.length, loadTimeline]);
+
+  const handleScrub = useCallback((i: number) => {
+    setSnapshotIndex(i);
+  }, []);
+
+  const handleTogglePlay = useCallback(() => {
+    setPlaying((p) => !p);
+  }, []);
+
+  // The graph rendered: the active snapshot when in history mode, else the
+  // normal single-snapshot graph. Default behaviour is unchanged when off.
+  const activeGraph: GraphData | null =
+    historyMode && snapshots.length > 0
+      ? snapshots[Math.min(snapshotIndex, snapshots.length - 1)]?.graph ?? graphData
+      : graphData;
+
   if (error) {
     return (
       <div className="flex h-dvh w-full flex-col items-center justify-center gap-4 bg-[var(--color-bg)]">
@@ -185,9 +266,9 @@ function GraphPageInner() {
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-[var(--color-bg)]">
-      {/* Canvas graph */}
+      {/* Canvas graph — swaps to the active snapshot in history mode */}
       <ForceGraph
-        data={graphData}
+        data={activeGraph ?? graphData}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onNodeHover={setHoveredNode}
@@ -198,6 +279,8 @@ function GraphPageInner() {
         nodeColors={nodeColors}
         edgeColors={edgeColors}
         visibleEdgeTypes={visibleEdgeTypes}
+        historyMode={historyMode}
+        churn={churn}
       />
 
       {/* Architecture drift panel (only when a .anomaly.yml was loaded) */}
@@ -205,6 +288,66 @@ function GraphPageInner() {
         <DriftPanel
           drift={graphData.drift}
           onSelectViolation={(v) => handleNavigate(v.source)}
+        />
+      )}
+
+      {/* History-mode toggle + sample-count picker (GitHub repos only) */}
+      {historyAvailable && (
+        <div className="absolute top-4 left-4 z-30 flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/90 px-2 py-1.5 backdrop-blur">
+          <button
+            type="button"
+            onClick={handleToggleHistory}
+            disabled={historyLoading}
+            title={historyMode ? 'Exit history mode' : 'Animate git history'}
+            className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors disabled:opacity-60 ${
+              historyMode
+                ? 'bg-white/10 text-[var(--color-text)]'
+                : 'text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)]'
+            }`}
+          >
+            {historyLoading ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <History size={14} />
+            )}
+            History
+          </button>
+          {!historyMode && snapshots.length === 0 && (
+            <label className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+              <span>samples</span>
+              <select
+                value={sampleCount}
+                onChange={(e) => setSampleCount(Number(e.target.value))}
+                disabled={historyLoading}
+                className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1 py-0.5 text-[11px] text-[var(--color-text)]"
+              >
+                {[6, 12, 20, 30].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {historyLoading && (
+            <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+              {historyProgress.loaded}/{historyProgress.total}
+            </span>
+          )}
+          {historyError && (
+            <span className="max-w-[180px] truncate text-[11px] text-red-400" title={historyError}>
+              {historyError}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Timeline scrubber (history mode) */}
+      {historyMode && snapshots.length > 0 && (
+        <Timeline
+          snapshots={snapshots}
+          index={Math.min(snapshotIndex, snapshots.length - 1)}
+          onIndexChange={handleScrub}
+          playing={playing}
+          onTogglePlay={handleTogglePlay}
         />
       )}
 

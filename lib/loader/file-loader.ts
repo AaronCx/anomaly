@@ -20,11 +20,16 @@ const SOURCE_EXTENSIONS = new Set([
   '.java',
 ]);
 
+// The architecture-rules file is read by the graph builder even though it
+// isn't source code.
+const RULES_BASENAME = '.anomaly.yml';
+
 function shouldInclude(path: string): boolean {
   const segments = path.split('/');
   for (const seg of segments) {
     if (SKIP_DIRS.has(seg)) return false;
   }
+  if (segments[segments.length - 1] === RULES_BASENAME) return true;
   const dotIdx = path.lastIndexOf('.');
   if (dotIdx === -1) return false;
   const ext = path.slice(dotIdx);

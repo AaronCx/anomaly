@@ -11,6 +11,7 @@ import FilterBar from '@/components/graph/FilterBar';
 import GraphControls from '@/components/graph/GraphControls';
 import Minimap from '@/components/graph/Minimap';
 import Legend from '@/components/graph/Legend';
+import { DriftPanel } from '@/components/graph/DriftPanel';
 import { loadFromGitHub } from '@/lib/loader/github-loader';
 import { buildGraph } from '@/lib/graph/graph-builder';
 import type { GraphData, GraphNode, FileType, EdgeType } from '@/lib/graph/types';
@@ -198,6 +199,14 @@ function GraphPageInner() {
         edgeColors={edgeColors}
         visibleEdgeTypes={visibleEdgeTypes}
       />
+
+      {/* Architecture drift panel (only when a .anomaly.yml was loaded) */}
+      {graphData.drift && (
+        <DriftPanel
+          drift={graphData.drift}
+          onSelectViolation={(v) => handleNavigate(v.source)}
+        />
+      )}
 
       {/* Filter bar */}
       <FilterBar

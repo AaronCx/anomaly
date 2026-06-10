@@ -25,12 +25,16 @@ export interface GraphEdge {
   target: string;
   weight: number;
   type: EdgeType;
+  /** Set when this dependency violates a declared architecture rule. */
+  violation?: import('@/lib/rules/types').Violation;
 }
 
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   clusters: Cluster[];
+  /** Architecture drift report, present when a .anomaly.yml was supplied. */
+  drift?: import('@/lib/rules/types').DriftReport;
 }
 
 export interface Cluster {

@@ -44,6 +44,18 @@ export interface ForceGraphProps {
   historyMode?: boolean;
   /** Per-file churn heat in [0, 1], keyed by file path. Used when historyMode. */
   churn?: Map<string, number> | null;
+  /** When true, render the agent-trace overlay (active/read/modified tints + path). */
+  traceMode?: boolean;
+  /** Node id touched on the current trace step (pulses). Used when traceMode. */
+  traceActiveId?: string | null;
+  /** Node ids read so far in the trace. Tinted blue. Used when traceMode. */
+  traceReadIds?: Set<string> | null;
+  /** Node ids modified/created so far. Tinted amber/green. Used when traceMode. */
+  traceModifiedIds?: Set<string> | null;
+  /** Node ids deleted so far. Dimmed/red. Used when traceMode. */
+  traceDeletedIds?: Set<string> | null;
+  /** Traversal hops (source→target node ids) to highlight. Used when traceMode. */
+  tracePath?: { source: string; target: string }[] | null;
 }
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -88,6 +100,12 @@ export default function ForceGraph({
   showLabels: forceShowLabels,
   historyMode,
   churn,
+  traceMode,
+  traceActiveId,
+  traceReadIds,
+  traceModifiedIds,
+  traceDeletedIds,
+  tracePath,
 }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -397,6 +415,32 @@ export default function ForceGraph({
       ctx.setLineDash([]);
     }
 
+    /* ── Trace traversal path ──────────────────────────── */
+    // In trace mode, draw a bright animated path between consecutively-touched
+    // files so you can follow the agent's route through the codebase.
+    if (traceMode && tracePath && tracePath.length > 0) {
+      const nodeById = new Map(nodes.map((n) => [n.id, n]));
+      const dash = (pulseRef.current * 6) % 16;
+      tracePath.forEach((hop, i) => {
+        const s = nodeById.get(hop.source);
+        const t2 = nodeById.get(hop.target);
+        if (!s || !t2) return;
+        // The most recent hops glow brighter; older ones fade back.
+        const recency = (i + 1) / tracePath.length;
+        const opacity = 0.25 + 0.55 * recency;
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t2.x, t2.y);
+        ctx.setLineDash([8, 8]);
+        ctx.lineDashOffset = -dash;
+        ctx.strokeStyle = hexToRGBA('#22d3ee', opacity);
+        ctx.lineWidth = 1.5 + 1.5 * recency;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineDashOffset = 0;
+      });
+    }
+
     /* ── Nodes ─────────────────────────────────────────── */
     for (const node of nodes) {
       const visible = isVisible(node);
@@ -432,7 +476,35 @@ export default function ForceGraph({
         ctx.fill();
       }
 
+      // Agent-trace tints: read = blue, modified/created = amber, deleted = red,
+      // active step = pulsing ring. Tint overrides the file-type color so the
+      // agent's footprint reads clearly; untouched nodes are dimmed back.
+      let traceColor: string | null = null;
+      if (traceMode) {
+        const isActive = traceActiveId === node.id;
+        const isModified = traceModifiedIds?.has(node.id);
+        const isRead = traceReadIds?.has(node.id);
+        const isDeleted = traceDeletedIds?.has(node.id);
+        if (isDeleted) traceColor = '#ef4444';
+        else if (isModified) traceColor = '#f59e0b';
+        else if (isRead) traceColor = '#3b82f6';
+        const touched = isActive || isModified || isRead || isDeleted;
+        // Dim everything the agent hasn't touched yet so the route stands out.
+        if (!touched && node.id !== selectedNodeId) alpha *= 0.18;
+
+        if (isActive) {
+          const pulse = 0.4 + 0.4 * Math.sin(pulseRef.current * 1.6);
+          const ringR = r * 2 + 6 + 4 * Math.sin(pulseRef.current * 1.6);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = hexToRGBA('#22d3ee', pulse);
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+      }
+
       // Glow gradient
+      const glowColor = traceColor ?? color;
       const glowRadius = node.id === hovered ? r * 2.5 : node.id === selectedNodeId ? r * 3 : r * 1.8;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
 
@@ -445,9 +517,9 @@ export default function ForceGraph({
         gradient.addColorStop(0.4, hexToRGBA(color, 0.7 * alpha));
         gradient.addColorStop(1, hexToRGBA(color, 0));
       } else {
-        gradient.addColorStop(0, hexToRGBA(color, alpha));
-        gradient.addColorStop(0.6, hexToRGBA(color, 0.3 * alpha));
-        gradient.addColorStop(1, hexToRGBA(color, 0));
+        gradient.addColorStop(0, hexToRGBA(glowColor, alpha));
+        gradient.addColorStop(0.6, hexToRGBA(glowColor, 0.3 * alpha));
+        gradient.addColorStop(1, hexToRGBA(glowColor, 0));
       }
 
       ctx.beginPath();
@@ -462,7 +534,7 @@ export default function ForceGraph({
         ? `rgba(255, 255, 255, ${alpha})`
         : node.id === hovered
           ? `rgba(255, 255, 255, ${0.9 * alpha})`
-          : hexToRGBA(color, alpha);
+          : hexToRGBA(glowColor, alpha);
       ctx.fill();
 
       // Search highlight pulse
@@ -490,7 +562,7 @@ export default function ForceGraph({
     ctx.restore();
 
     animFrameRef.current = requestAnimationFrame(drawRef.current);
-  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes, historyMode, churn]);
+  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes, historyMode, churn, traceMode, traceActiveId, traceReadIds, traceModifiedIds, traceDeletedIds, tracePath]);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */

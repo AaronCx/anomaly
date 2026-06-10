@@ -56,39 +56,56 @@ interface GitHubTreeResponse {
   truncated: boolean;
 }
 
-interface GitHubContentResponse {
+interface GitHubBlobResponse {
   content: string;
   encoding: string;
 }
 
-/**
- * Load source files from a GitHub repository using the REST API.
- * Runs entirely in the browser — no backend needed.
- */
-export async function loadFromGitHub(
-  owner: string,
-  repo: string,
-  token?: string,
-  onProgress?: ProgressCallback,
-): Promise<Map<string, string>> {
+/** Build the auth/accept headers shared by every GitHub REST call. */
+export function gitHubHeaders(token?: string): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github.v3+json',
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
+  return headers;
+}
 
-  // 1. Fetch the full file tree
+/** Turn a non-OK GitHub response into a user-facing error message. */
+function gitHubErrorMessage(res: Response): string {
+  if (res.status === 403 || res.status === 429) {
+    return 'GitHub API rate limit exceeded. Provide a personal access token to increase limits.';
+  }
+  return `GitHub API error: ${res.status} ${res.statusText}`;
+}
+
+/**
+ * Load source files from a GitHub repository using the REST API.
+ * Runs entirely in the browser — no backend needed.
+ *
+ * Pass a `ref` (branch, tag, or commit SHA) to load the tree as it existed at
+ * that point in history; defaults to HEAD. File contents are fetched by blob
+ * SHA (from the recursive tree), which both pins them to the requested commit
+ * and lets the blob endpoint be cached by content hash across snapshots.
+ */
+export async function loadFromGitHub(
+  owner: string,
+  repo: string,
+  token?: string,
+  onProgress?: ProgressCallback,
+  ref = 'HEAD',
+): Promise<Map<string, string>> {
+  const headers = gitHubHeaders(token);
+
+  // 1. Fetch the full file tree at the requested ref
   const treeRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/${ref}?recursive=1`,
     { headers },
   );
 
   if (!treeRes.ok) {
-    const msg = treeRes.status === 403
-      ? 'GitHub API rate limit exceeded. Provide a personal access token to increase limits.'
-      : `GitHub API error: ${treeRes.status} ${treeRes.statusText}`;
-    throw new Error(msg);
+    throw new Error(gitHubErrorMessage(treeRes));
   }
 
   const treeData: GitHubTreeResponse = await treeRes.json();
@@ -102,15 +119,17 @@ export async function loadFromGitHub(
   const result = new Map<string, string>();
   let loaded = 0;
 
-  // 3. Batch-fetch file contents in groups of 10
+  // 3. Batch-fetch file contents (by blob SHA) in groups of 10
   const BATCH_SIZE = 10;
 
   for (let i = 0; i < sourceFiles.length; i += BATCH_SIZE) {
     const batch = sourceFiles.slice(i, i + BATCH_SIZE);
 
     const promises = batch.map(async (file) => {
+      // The blob endpoint is content-addressed by SHA, so the same blob across
+      // snapshots resolves to the same URL and can be served from HTTP cache.
       const res = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/contents/${file.path}`,
+        `https://api.github.com/repos/${owner}/${repo}/git/blobs/${file.sha}`,
         { headers },
       );
 
@@ -124,7 +143,7 @@ export async function loadFromGitHub(
         10,
       );
 
-      const data: GitHubContentResponse = await res.json();
+      const data: GitHubBlobResponse = await res.json();
 
       if (data.encoding === 'base64' && data.content) {
         const content = atob(data.content.replace(/\n/g, ''));

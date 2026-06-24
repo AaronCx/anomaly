@@ -1,7 +1,7 @@
 import type { FileType } from '@/lib/graph/types';
 
 /* ════════════════════════════════════════════════════════════════════
-   Canvas palette mirror for "Refined Obsidian".
+   Canvas palette mirror — dark, synaptic graph UI.
 
    These hex values are the JS-side source of truth for the <canvas>
    renderer (ForceGraph), the Minimap, and any component that needs a
@@ -83,6 +83,34 @@ export const RENDER = {
     path: '#22d3ee',
     active: '#22d3ee',
   },
+  /** Synaptic connection rendering. Resting connections stay faint so the graph
+   *  reads as clustered lobes rather than spaghetti; the focused neighbourhood
+   *  lights up and "fires" signal pulses that travel along the active pathways. */
+  synapse: {
+    edgeRest: 0.14,  // base opacity for a resting connection
+    edgeFocus: 0.85, // opacity for connections in the focused neighbourhood
+    edgeDim: 0.035,  // opacity for everything outside the focus
+    pulse: '#67e8f9', // bright signal colour that travels along active edges
+    spark: '#a5f3fc', // brighter core of a signal pulse
+  },
+} as const;
+
+/* ── Graph layout (neural lobe clustering) ────────────────────────────
+   Files in the same directory cluster are pulled toward a shared anchor so
+   each cluster forms a distinct lobe; lobes are arranged around the centre
+   and connected by their cross-cluster edges. */
+
+export const LAYOUT = {
+  /** How strongly a node is pulled toward its cluster's anchor (tight lobes). */
+  clusterStrength: 0.18,
+  /** Base radius (px) of the ring the cluster anchors sit on; scaled by size. */
+  clusterRingBase: 160,
+  /** Weak global centring so the whole graph stays roughly centred. */
+  centerStrength: 0.02,
+  /** Per-node degree → radius boost (hubs grow); capped in code. */
+  hubBoost: 0.55,
+  /** Min connection count for a node to show its label at rest (hubs only). */
+  hubLabelDegree: 5,
 } as const;
 
 /* ── Physics / force simulation ───────────────────────── */

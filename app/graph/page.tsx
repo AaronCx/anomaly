@@ -59,7 +59,9 @@ function GraphPageInner() {
   const [showLabels, setShowLabels] = useState(false);
   const [nodeColors, setNodeColors] = useState<Record<FileType, string>>({ ...FILE_TYPE_COLORS });
   const [edgeColors, setEdgeColors] = useState<Record<EdgeType, string>>({ ...DEFAULT_EDGE_COLORS });
-  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(new Set(['import', 'export', 'call']));
+  // Export edges are the reverse-duplicate of imports; off by default to keep
+  // the graph readable. Toggle "Connected files" in the Legend to show them.
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<EdgeType>>(new Set(['import', 'call']));
 
   // History (git-timeline) mode — only available when a GitHub repo is loaded.
   const [historyMode, setHistoryMode] = useState(false);

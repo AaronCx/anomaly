@@ -2,7 +2,7 @@
 
 > See how any codebase connects.
 
-Drop a folder or paste a GitHub URL. Anomaly parses the entire codebase in your browser and renders an interactive Obsidian-style force graph showing every file, every import, every function — instantly.
+Drop a folder or paste a GitHub URL. Anomaly parses the entire codebase in your browser and renders an interactive, neural-style force graph showing every file, every import, every function — instantly.
 
 **Zero backend. Zero config. Zero API keys required.**
 
@@ -17,15 +17,15 @@ Pre-loaded demos: Anomaly (self-referential), AgentForge, LastGate
 1. **Load** — Drag-and-drop a project folder (File System API, works offline) or paste a GitHub URL (REST API from the browser)
 2. **Parse** — @babel/parser for JS/TS/JSX/TSX, regex for Python/Java — all in the browser
 3. **Build** — Graph data structure from import relationships with cluster detection
-4. **Render** — D3.js force simulation on HTML5 Canvas with Obsidian-style floating nodes
+4. **Render** — D3.js force simulation on HTML5 Canvas with neural-style clustered lobes and glowing nodes
 
 ## Visual Style
 
-Obsidian graph view aesthetic — organic, floaty, alive:
-- **Nodes**: Glowing circles sized by file complexity, colored by type
-- **Edges**: Semi-transparent curved lines, opacity based on connection strength
+Neural-network aesthetic — organic, clustered, alive:
+- **Nodes**: Glowing neurons sized by connection count, colored by file type
+- **Lobes**: Files in the same directory condense into distinct clusters connected by axon-like bundles
+- **Synapses**: Faint resting connections that light up and fire signal pulses through the focused neighborhood on hover/select
 - **Physics**: Real force simulation — grab a node and the whole graph responds
-- **Clusters**: Files that depend on each other naturally group together with soft halos
 
 ## Features
 
@@ -90,7 +90,7 @@ AST Parser (browser) -- @babel/parser for JS/TS, regex for Python/Java
 Graph Builder (browser) -- nodes + edges from parsed data
       |
       v
-D3 Force Graph (canvas) -- Obsidian-style visualization
+D3 Force Graph (canvas) -- neural-style clustered visualization
 ```
 
 ### Why This Architecture

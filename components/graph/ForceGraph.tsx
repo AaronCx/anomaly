@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import type { GraphData, GraphNode, GraphEdge, FileType, Cluster } from '@/lib/graph/types';
-import { FILE_TYPE_COLORS, COLORS, EDGE_TYPE_COLORS, RENDER, PHYSICS, NODE } from '@/lib/constants';
+import { FILE_TYPE_COLORS, COLORS, EDGE_TYPE_COLORS, RENDER, PHYSICS, NODE, LAYOUT } from '@/lib/constants';
 import type { EdgeColorKey } from '@/lib/constants';
 
 /* ── Simulation node/link with mutable D3 fields ─────────── */
@@ -17,6 +17,10 @@ interface SimNode extends GraphNode {
   fx?: number | null;
   fy?: number | null;
   _phase: number;
+  /** Index of the directory cluster this node belongs to (its lobe). */
+  _cluster: number;
+  /** Connection count (import + call). Hubs are larger and brighter. */
+  _degree: number;
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -199,17 +203,54 @@ export default function ForceGraph({
     const linkStrength = Math.min(0.1, 0.15 / Math.max(edgeDensity, 1)) * 1.1;
     const collisionPad = (20 + edgeDensity * 6) * 0.9;
 
-    // Build nodes
-    const spread = 0.5;
-    const nodes: SimNode[] = data.nodes.map((n, i) => ({
-      ...n,
-      x: n.x ?? width / 2 + (Math.random() - 0.5) * width * spread,
-      y: n.y ?? height / 2 + (Math.random() - 0.5) * height * spread,
-      vx: 0,
-      vy: 0,
-      radius: nodeRadius(n.loc),
-      _phase: i * 2.39996, // Golden angle offset for unique drift per node
-    }));
+    // ── Cluster lobes ───────────────────────────────────────────────
+    // Map every node to its directory cluster and lay the clusters out on a
+    // ring around the centre, so each cluster condenses into a distinct lobe
+    // (ganglion) connected to the others — instead of one centred hairball.
+    clustersRef.current = data.clusters;
+    const clusterIndex = new Map<string, number>();
+    data.clusters.forEach((c, ci) => {
+      for (const id of c.nodeIds) clusterIndex.set(id, ci);
+    });
+    const clusterCount = Math.max(1, data.clusters.length);
+    const ringRadius = LAYOUT.clusterRingBase * Math.sqrt(clusterCount) + Math.sqrt(nodeCount) * 6;
+    const anchors = data.clusters.map((_, ci) => {
+      const a = (ci / clusterCount) * Math.PI * 2 - Math.PI / 2;
+      return { x: width / 2 + Math.cos(a) * ringRadius, y: height / 2 + Math.sin(a) * ringRadius };
+    });
+    const anchorFor = (n: SimNode) => anchors[n._cluster] ?? { x: width / 2, y: height / 2 };
+
+    // ── Degree (import + call connections) for hub sizing ───────────
+    const degree = new Map<string, number>();
+    for (const e of data.edges) {
+      if (e.type === 'export') continue; // reverse-duplicate of an import
+      degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+      degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+    }
+
+    // Build nodes. Seed positions near the node's cluster anchor so the layout
+    // settles into lobes quickly instead of unwinding from the centre.
+    const nodes: SimNode[] = data.nodes.map((n, i) => {
+      const ci = clusterIndex.get(n.id) ?? 0;
+      const a = (ci / clusterCount) * Math.PI * 2 - Math.PI / 2;
+      const ax = width / 2 + Math.cos(a) * ringRadius;
+      const ay = height / 2 + Math.sin(a) * ringRadius;
+      const deg = degree.get(n.id) ?? 0;
+      // Hubs grow with connection count, clamped so they stay readable.
+      const base = nodeRadius(n.loc);
+      const radius = Math.min(NODE.maxRadius * 1.6, base * (1 + LAYOUT.hubBoost * Math.log2(1 + deg) * 0.25));
+      return {
+        ...n,
+        x: n.x ?? ax + (Math.random() - 0.5) * 80,
+        y: n.y ?? ay + (Math.random() - 0.5) * 80,
+        vx: 0,
+        vy: 0,
+        radius,
+        _phase: i * 2.39996, // Golden angle offset for unique drift per node
+        _cluster: ci,
+        _degree: deg,
+      };
+    });
     nodesRef.current = nodes;
 
     const nodeMap = new Map(nodes.map((n) => [n.id, n]));
@@ -229,7 +270,6 @@ export default function ForceGraph({
     // Only import + call edges drive the physics (export edges are visual-only,
     // they're the reverse of imports and would double the pull force)
     const physicsLinks = allLinks.filter((l) => l.type !== 'export');
-    clustersRef.current = data.clusters;
 
     // Stop previous simulation
     if (simRef.current) simRef.current.stop();
@@ -248,13 +288,14 @@ export default function ForceGraph({
           .strength(linkStrength),
       )
       .force('charge', d3.forceManyBody<SimNode>().strength(chargeStrength).distanceMax(400))
-      .force('center', d3.forceCenter(width / 2, height / 2).strength(0.5))
+      .force('center', d3.forceCenter(width / 2, height / 2).strength(LAYOUT.centerStrength))
       .force(
         'collision',
         d3.forceCollide<SimNode>().radius((d) => d.radius + collisionPad).strength(1),
       )
-      .force('x', d3.forceX<SimNode>(width / 2).strength(0.01))
-      .force('y', d3.forceY<SimNode>(height / 2).strength(0.01))
+      // Cluster gravity: pull each node toward its lobe's anchor on the ring.
+      .force('clusterX', d3.forceX<SimNode>((d) => anchorFor(d).x).strength(LAYOUT.clusterStrength))
+      .force('clusterY', d3.forceY<SimNode>((d) => anchorFor(d).y).strength(LAYOUT.clusterStrength))
       .alphaDecay(PHYSICS.alphaDecay)
       .alphaMin(PHYSICS.alphaMin)
       .velocityDecay(PHYSICS.velocityDecay)
@@ -266,8 +307,8 @@ export default function ForceGraph({
         for (const node of nodes) {
           if (!node.fx && !node.fy) {
             const phase = (node as SimNode & { _phase: number })._phase;
-            node.vx! += Math.sin(t + phase) * 0.04;
-            node.vy! += Math.cos(t + phase * 1.3) * 0.04;
+            node.vx! += Math.sin(t + phase) * 0.02;
+            node.vy! += Math.cos(t + phase * 1.3) * 0.02;
           }
         }
       });
@@ -315,8 +356,11 @@ export default function ForceGraph({
       return filters.has(n.fileType);
     };
 
-    // Connected set for hover highlighting
-    const connectedSet = hovered ? getConnected(hovered, links) : null;
+    // Focus = the hovered node, or the selected node when nothing is hovered.
+    // The focused neighbourhood lights up and fires signal pulses; everything
+    // else dims to context — this is what keeps large graphs legible.
+    const focusId = hovered ?? selectedNodeId ?? null;
+    const connectedSet = focusId ? getConnected(focusId, links) : null;
 
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -366,9 +410,12 @@ export default function ForceGraph({
       }
     }
 
-    /* ── Edges ─────────────────────────────────────────── */
+    /* ── Edges (synaptic connections) ──────────────────── */
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    // Connections in the focused neighbourhood are collected so signal pulses
+    // can be drawn travelling along them after the static edges are laid down.
+    const focusEdges: { s: SimNode; t2: SimNode }[] = [];
     for (const link of links) {
       // Skip edge types that are toggled off
       if (visibleEdgeTypes && link.type && !visibleEdgeTypes.has(link.type)) continue;
@@ -378,20 +425,25 @@ export default function ForceGraph({
       if (!isVisible(s) && !isVisible(t2)) continue;
 
       const bothVisible = isVisible(s) && isVisible(t2);
+      const sId = s.id;
+      const tId = t2.id;
 
-      // Scale opacity by edge weight (more imports = brighter)
-      let opacity = Math.min(0.5, 0.25 + (link.weight || 1) * 0.08);
-      let lineWidth = Math.min(2, 0.8 + (link.weight || 1) * 0.3);
+      // Is this connection part of the focused neighbourhood (a firing synapse)?
+      const isFocusEdge =
+        !!focusId && connectedSet!.has(sId) && connectedSet!.has(tId) && (sId === focusId || tId === focusId);
+      if (isFocusEdge) focusEdges.push({ s, t2 });
 
-      if (hovered) {
-        const sId = s.id;
-        const tId = t2.id;
-        if (connectedSet!.has(sId) && connectedSet!.has(tId) && (sId === hovered || tId === hovered)) {
-          opacity = 0.7;
-          lineWidth = 2.5;
+      // Resting connections stay faint so the graph reads as clustered lobes;
+      // the focused neighbourhood lights up and everything else recedes.
+      let opacity = RENDER.synapse.edgeRest * (1 + (link.weight || 1) * 0.12);
+      let lineWidth = Math.min(1.6, 0.6 + (link.weight || 1) * 0.22);
+      if (focusId) {
+        if (isFocusEdge) {
+          opacity = RENDER.synapse.edgeFocus;
+          lineWidth = Math.max(lineWidth, 1.8);
         } else {
-          opacity = 0.06;
-          lineWidth = 0.3;
+          opacity = RENDER.synapse.edgeDim;
+          lineWidth = 0.4;
         }
       }
 
@@ -413,8 +465,6 @@ export default function ForceGraph({
         ctx.setLineDash([]);
       }
 
-      // Scale opacity by weight
-      opacity = Math.min(opacity * (1 + link.weight * 0.15), 0.6);
       if (isViolation) opacity = Math.max(opacity, 0.85); // keep violations visible
 
       // Quadratic bezier with slight curve
@@ -439,8 +489,8 @@ export default function ForceGraph({
       ctx.lineWidth = isViolation ? lineWidth + 1 : lineWidth;
       ctx.stroke();
 
-      // Arrow indicator at 70% along the curve
-      if (k > 0.6 && lineWidth > 0.5) {
+      // Direction arrow — only on focused (firing) connections, to declutter.
+      if (isFocusEdge && k > 0.5) {
         const tt = 0.7;
         const ax = (1 - tt) * (1 - tt) * s.x + 2 * (1 - tt) * tt * cpx + tt * tt * t2.x;
         const ay = (1 - tt) * (1 - tt) * s.y + 2 * (1 - tt) * tt * cpy + tt * tt * t2.y;
@@ -495,10 +545,63 @@ export default function ForceGraph({
       });
     }
 
+    /* ── Signal pulses (synaptic firing) ───────────────── */
+    // A small glowing dot travels along active connections. When a node is
+    // focused its whole neighbourhood fires; otherwise a few ambient sparks
+    // wander the network so it always feels alive.
+    {
+      const drawPulse = (s: SimNode, t2: SimNode, frac: number, alpha: number, size: number) => {
+        const dx = t2.x - s.x;
+        const dy = t2.y - s.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 1) return;
+        const offset = Math.min(20, len * 0.1);
+        const inv = 1 / (len + 1);
+        const mx = (s.x + t2.x) / 2;
+        const my = (s.y + t2.y) / 2;
+        const cpx = mx - dy * offset * inv;
+        const cpy = my + dx * offset * inv;
+        const omf = 1 - frac;
+        const px = omf * omf * s.x + 2 * omf * frac * cpx + frac * frac * t2.x;
+        const py = omf * omf * s.y + 2 * omf * frac * cpy + frac * frac * t2.y;
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, size);
+        grad.addColorStop(0, hexToRGBA(RENDER.synapse.spark, alpha));
+        grad.addColorStop(0.5, hexToRGBA(RENDER.synapse.pulse, alpha * 0.6));
+        grad.addColorStop(1, hexToRGBA(RENDER.synapse.pulse, 0));
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      };
+
+      const speed = 0.18;
+      if (focusEdges.length > 0) {
+        focusEdges.forEach((e, i) => {
+          const f = (pulseRef.current * speed + (i * 0.137) % 1) % 1;
+          drawPulse(e.s, e.t2, f, 0.9, 3.5);
+          drawPulse(e.s, e.t2, (f + 0.5) % 1, 0.35, 2.5);
+        });
+      } else if (!traceMode && k > 0.35) {
+        // Ambient life: a small rotating subset of connections sparks faintly.
+        const count = Math.min(18, links.length);
+        const base = Math.floor(pulseRef.current * 0.25);
+        for (let i = 0; i < count; i++) {
+          const link = links[(i * 53 + base) % links.length];
+          if (!link) continue;
+          if (visibleEdgeTypes && link.type && !visibleEdgeTypes.has(link.type)) continue;
+          const s = link.source as SimNode;
+          const t2 = link.target as SimNode;
+          if (!isVisible(s) || !isVisible(t2)) continue;
+          const f = (pulseRef.current * speed * 0.7 + (i * 0.31) % 1) % 1;
+          drawPulse(s, t2, f, 0.4, 2.6);
+        }
+      }
+    }
+
     /* ── Nodes ─────────────────────────────────────────── */
     for (const node of nodes) {
       const visible = isVisible(node);
-      if (!visible && !hovered) continue;
+      if (!visible && !focusId) continue;
 
       const r = node.radius;
 
@@ -508,8 +611,8 @@ export default function ForceGraph({
       const color = (customNodeColors?.[node.fileType]) || FILE_TYPE_COLORS[node.fileType] || FILE_TYPE_COLORS.unknown;
       let alpha = visible ? 1 : 0.1;
 
-      if (hovered && node.id !== hovered && !connectedSet!.has(node.id)) {
-        alpha *= 0.3;
+      if (focusId && node.id !== focusId && !connectedSet!.has(node.id)) {
+        alpha *= 0.22;
       }
 
       // Churn heat: in history mode, frequently-changed files glow hot. The
@@ -645,8 +748,17 @@ export default function ForceGraph({
         ctx.stroke();
       }
 
-      // Labels
-      const showLabel = forceShowLabels || k > 0.7 || isHovered || isSelected;
+      // Labels — at rest only hubs (and only when zoomed in a little) get a
+      // label so large graphs stay readable; the focused neighbourhood and the
+      // hovered/selected node are always labelled. The "Toggle labels" control
+      // (forceShowLabels) still reveals everything.
+      const inFocus = !!focusId && !!connectedSet?.has(node.id);
+      const showLabel =
+        forceShowLabels ||
+        isHovered ||
+        isSelected ||
+        inFocus ||
+        (!focusId && node._degree >= LAYOUT.hubLabelDegree && k > 0.75);
       if (showLabel && visible) {
         ctx.font = `11px ${RENDER.fontMono}`;
         ctx.textAlign = 'center';

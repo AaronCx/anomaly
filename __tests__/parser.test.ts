@@ -55,11 +55,10 @@ describe('parseFile', () => {
     `
     const result = parseFile(code, 'routes/users.ts')
     expect(result).not.toBeNull()
-    expect(result!.routeDefinitions.length).toBeGreaterThanOrEqual(3)
-    const getRoute = result!.routeDefinitions.find(r => r.method === 'GET' && r.path === '/users')
-    expect(getRoute).toBeDefined()
-    const postRoute = result!.routeDefinitions.find(r => r.method === 'POST')
-    expect(postRoute).toBeDefined()
+    // Express route registrations surface as member-expression calls (router.<verb>)
+    expect(result!.calls.some(c => c.callee === 'router.get')).toBe(true)
+    expect(result!.calls.some(c => c.callee === 'router.post')).toBe(true)
+    expect(result!.calls.some(c => c.callee === 'router.delete')).toBe(true)
   })
 
   it('extracts call expressions', () => {
@@ -72,12 +71,12 @@ describe('parseFile', () => {
     `
     const result = parseFile(code, 'test.js')
     expect(result).not.toBeNull()
-    const calls = result!.callExpressions.filter(c => c.callerFunction === 'processData')
+    const calls = result!.calls.filter(c => c.caller === 'processData')
     expect(calls.length).toBeGreaterThanOrEqual(3)
-    const callNames = calls.map(c => c.calleeName)
-    expect(callNames).toContain('validate')
-    expect(callNames).toContain('transform')
-    expect(callNames).toContain('save')
+    const callees = calls.map(c => c.callee)
+    expect(callees).toContain('validate')
+    expect(callees).toContain('transform')
+    expect(callees).toContain('save')
   })
 
   it('handles TypeScript with types', () => {

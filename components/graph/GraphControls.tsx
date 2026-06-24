@@ -1,6 +1,7 @@
 'use client';
 
 import { ZoomIn, ZoomOut, Maximize, Map, Type } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface GraphControlsProps {
   nodeCount: number;
@@ -12,6 +13,7 @@ interface GraphControlsProps {
   onFitView: () => void;
   onToggleMinimap: () => void;
   onToggleLabels: () => void;
+  className?: string;
 }
 
 function ControlButton({
@@ -29,11 +31,14 @@ function ControlButton({
     <button
       onClick={onClick}
       title={title}
-      className={`rounded-lg p-2 transition-colors ${
+      aria-label={title}
+      aria-pressed={active}
+      className={cn(
+        'inline-flex items-center justify-center rounded-lg p-2 transition active:scale-95',
         active
-          ? 'bg-white/10 text-[var(--color-text)]'
-          : 'text-[var(--color-text-muted)] hover:bg-white/5 hover:text-[var(--color-text)]'
-      }`}
+          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent-bright)]'
+          : 'text-[var(--color-text-muted)] hover:bg-white/[0.06] hover:text-[var(--color-text)]',
+      )}
     >
       {children}
     </button>
@@ -50,11 +55,17 @@ export default function GraphControls({
   onFitView,
   onToggleMinimap,
   onToggleLabels,
+  className,
 }: GraphControlsProps) {
   return (
-    <div className="fixed bottom-2 sm:bottom-4 left-2 sm:left-4 z-30 flex flex-col items-start gap-1 sm:gap-2">
+    <div
+      className={cn(
+        'fixed bottom-2 sm:bottom-4 left-2 sm:left-4 z-30 flex flex-col items-start gap-1 sm:gap-2 animate-fade-in-up',
+        className,
+      )}
+    >
       {/* Controls */}
-      <div className="flex items-center gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/80 p-1 backdrop-blur-md">
+      <div className="glass flex items-center gap-0.5 rounded-xl p-1">
         <ControlButton onClick={onZoomIn} title="Zoom in">
           <ZoomIn size={16} />
         </ControlButton>
@@ -74,7 +85,7 @@ export default function GraphControls({
       </div>
 
       {/* Stats */}
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]/80 px-2.5 py-1 backdrop-blur-md">
+      <div className="glass rounded-lg px-2.5 py-1">
         <span className="font-[var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
           {nodeCount} nodes &middot; {edgeCount} edges
         </span>

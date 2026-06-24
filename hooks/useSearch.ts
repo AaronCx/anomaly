@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 export function useSearch() {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
@@ -11,9 +12,21 @@ export function useSearch() {
     setHighlightedNodeId(nodeId);
     setIsOpen(false);
 
+    // Clear any pending highlight reset before scheduling a new one
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+
     // Clear highlight after animation
-    const timer = setTimeout(() => setHighlightedNodeId(null), 3000);
-    return () => clearTimeout(timer);
+    highlightTimer.current = setTimeout(() => {
+      setHighlightedNodeId(null);
+      highlightTimer.current = null;
+    }, 3000);
+  }, []);
+
+  // Clear any pending highlight timer on unmount
+  useEffect(() => {
+    return () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    };
   }, []);
 
   // Cmd+K / Ctrl+K shortcut

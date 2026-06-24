@@ -11,6 +11,7 @@ interface FileEntry {
 
 interface DropZoneProps {
   onFilesLoaded: (files: FileEntry[]) => void;
+  className?: string;
 }
 
 async function readFileEntry(entry: FileSystemEntry): Promise<FileEntry[]> {
@@ -72,8 +73,9 @@ async function readFromInput(fileList: FileList): Promise<FileEntry[]> {
   return results;
 }
 
-export default function DropZone({ onFilesLoaded }: DropZoneProps) {
+export default function DropZone({ onFilesLoaded, className }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleDrop = useCallback(
@@ -88,8 +90,13 @@ export default function DropZone({ onFilesLoaded }: DropZoneProps) {
         if (entry) entries.push(entry);
       }
 
-      const files = (await Promise.all(entries.map(readFileEntry))).flat();
-      if (files.length > 0) onFilesLoaded(files);
+      setPending(true);
+      try {
+        const files = (await Promise.all(entries.map(readFileEntry))).flat();
+        if (files.length > 0) onFilesLoaded(files);
+      } finally {
+        setPending(false);
+      }
     },
     [onFilesLoaded],
   );
@@ -104,8 +111,13 @@ export default function DropZone({ onFilesLoaded }: DropZoneProps) {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const fileList = e.target.files;
       if (!fileList || fileList.length === 0) return;
-      const files = await readFromInput(fileList);
-      if (files.length > 0) onFilesLoaded(files);
+      setPending(true);
+      try {
+        const files = await readFromInput(fileList);
+        if (files.length > 0) onFilesLoaded(files);
+      } finally {
+        setPending(false);
+      }
     },
     [onFilesLoaded],
   );
@@ -113,8 +125,11 @@ export default function DropZone({ onFilesLoaded }: DropZoneProps) {
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 transition-all duration-200',
-        dragOver && 'border-[var(--color-accent)] shadow-[0_0_30px_rgba(96,165,250,0.15)]',
+        'glass group flex flex-col items-center justify-center gap-4 rounded-xl p-8 transition-all duration-200 ease-out',
+        dragOver &&
+          'border-[var(--color-accent)] shadow-[var(--shadow-glow)]',
+        pending && 'pointer-events-none opacity-60',
+        className,
       )}
       onDragOver={(e) => {
         e.preventDefault();
@@ -123,22 +138,31 @@ export default function DropZone({ onFilesLoaded }: DropZoneProps) {
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--color-border)]">
+      <div
+        className={cn(
+          'flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--color-surface-2)] transition-colors duration-200',
+          dragOver && 'bg-[var(--color-accent)]/15',
+        )}
+      >
         {dragOver ? (
-          <Upload className="h-6 w-6 text-[var(--color-accent)]" />
+          <Upload className="h-6 w-6 text-[var(--color-accent-bright)]" />
         ) : (
-          <FolderOpen className="h-6 w-6 text-[var(--color-text-muted)]" />
+          <FolderOpen className="h-6 w-6 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
         )}
       </div>
 
       <div className="text-center">
-        <p className="font-medium">Drop your project folder here</p>
+        <p className="font-medium text-[var(--color-text)]">
+          {pending ? 'Reading folder…' : 'Drop your project folder here'}
+        </p>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
           or{' '}
           <button
             type="button"
             onClick={handleBrowse}
-            className="text-[var(--color-accent)] underline underline-offset-2 hover:brightness-125"
+            disabled={pending}
+            aria-label="Browse for a project folder"
+            className="font-medium text-[var(--color-accent)] underline underline-offset-2 transition hover:text-[var(--color-accent-bright)] disabled:opacity-50 disabled:pointer-events-none"
           >
             browse files
           </button>

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import type { GraphData, GraphNode, GraphEdge, FileType, Cluster } from '@/lib/graph/types';
-import { FILE_TYPE_COLORS, COLORS, PHYSICS, NODE } from '@/lib/constants';
+import { FILE_TYPE_COLORS, COLORS, EDGE_TYPE_COLORS, RENDER, PHYSICS, NODE } from '@/lib/constants';
+import type { EdgeColorKey } from '@/lib/constants';
 
 /* ── Simulation node/link with mutable D3 fields ─────────── */
 
@@ -56,6 +57,11 @@ export interface ForceGraphProps {
   traceDeletedIds?: Set<string> | null;
   /** Traversal hops (source→target node ids) to highlight. Used when traceMode. */
   tracePath?: { source: string; target: string }[] | null;
+  /**
+   * Emits the currently-visible region in WORLD coordinates whenever the view
+   * transform changes (throttled). Used to drive the Minimap viewport lens.
+   */
+  onViewportChange?: (rect: { x: number; y: number; width: number; height: number }) => void;
 }
 
 /* ── Helpers ─────────────────────────────────────────────── */
@@ -106,6 +112,7 @@ export default function ForceGraph({
   traceModifiedIds,
   traceDeletedIds,
   tracePath,
+  onViewportChange,
 }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -125,10 +132,53 @@ export default function ForceGraph({
   const onNodeClickRef = useRef(onNodeClick);
   const onNodeDoubleClickRef = useRef(onNodeDoubleClick);
   const onNodeHoverRef = useRef(onNodeHover);
+  const onViewportChangeRef = useRef(onViewportChange);
   const hitTestRef = useRef<((mx: number, my: number) => SimNode | null) | null>(null);
+  // Throttle bookkeeping for viewport emission (avoid 60fps React re-render storms).
+  const lastViewportEmitRef = useRef<{ t: number; rect: { x: number; y: number; width: number; height: number } }>(
+    { t: 0, rect: { x: 0, y: 0, width: 0, height: 0 } },
+  );
   useEffect(() => { onNodeClickRef.current = onNodeClick; }, [onNodeClick]);
   useEffect(() => { onNodeDoubleClickRef.current = onNodeDoubleClick; }, [onNodeDoubleClick]);
   useEffect(() => { onNodeHoverRef.current = onNodeHover; }, [onNodeHover]);
+  useEffect(() => { onViewportChangeRef.current = onViewportChange; }, [onViewportChange]);
+
+  /* ── Viewport emission (world coords, throttled ~120ms) ── */
+
+  const emitViewport = useCallback((force = false) => {
+    const cb = onViewportChangeRef.current;
+    const canvas = canvasRef.current;
+    if (!cb || !canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const t = transformRef.current;
+    const rect = {
+      x: -t.x / t.k,
+      y: -t.y / t.k,
+      width: w / t.k,
+      height: h / t.k,
+    };
+    const now = performance.now();
+    const last = lastViewportEmitRef.current;
+    // Throttle to ~once per 120ms; skip if effectively unchanged.
+    if (!force && now - last.t < 120) return;
+    const r = last.rect;
+    if (
+      !force &&
+      Math.abs(r.x - rect.x) < 0.5 &&
+      Math.abs(r.y - rect.y) < 0.5 &&
+      Math.abs(r.width - rect.width) < 0.5 &&
+      Math.abs(r.height - rect.height) < 0.5
+    ) {
+      return;
+    }
+    lastViewportEmitRef.current = { t: now, rect };
+    cb(rect);
+  }, []);
+
+  const emitViewportRef = useRef(emitViewport);
+  useEffect(() => { emitViewportRef.current = emitViewport; }, [emitViewport]);
 
   /* ── Build / rebuild simulation ──────────────────────── */
 
@@ -241,7 +291,6 @@ export default function ForceGraph({
 
   const drawRef = useRef<() => void>(() => {});
 
-  // eslint-disable-next-line react-hooks/rules-of-hooks -- draw function stored in ref for animation loop
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -295,9 +344,10 @@ export default function ForceGraph({
           if (dist > maxDist) maxDist = dist;
         }
 
-        const radius = maxDist + 40;
+        const radius = maxDist + 48;
         const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        gradient.addColorStop(0, hexToRGBA(cluster.color, 0.06));
+        gradient.addColorStop(0, hexToRGBA(cluster.color, RENDER.cluster.haloCoreAlpha));
+        gradient.addColorStop(0.6, hexToRGBA(cluster.color, RENDER.cluster.haloMidAlpha));
         gradient.addColorStop(1, hexToRGBA(cluster.color, 0));
 
         ctx.beginPath();
@@ -307,15 +357,18 @@ export default function ForceGraph({
 
         // Cluster label when zoomed out
         if (k < 0.8) {
-          ctx.font = `${14 / k}px var(--font-sans), sans-serif`;
-          ctx.fillStyle = hexToRGBA(cluster.color, 0.3);
+          ctx.font = `${14 / k}px ${RENDER.fontSans}`;
+          ctx.fillStyle = hexToRGBA(cluster.color, RENDER.cluster.labelAlpha);
           ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
           ctx.fillText(cluster.label, cx, cy - radius * 0.3);
         }
       }
     }
 
     /* ── Edges ─────────────────────────────────────────── */
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     for (const link of links) {
       // Skip edge types that are toggled off
       if (visibleEdgeTypes && link.type && !visibleEdgeTypes.has(link.type)) continue;
@@ -378,10 +431,10 @@ export default function ForceGraph({
       ctx.quadraticCurveTo(cpx, cpy, t2.x, t2.y);
       // Use custom edge colors if provided, otherwise defaults.
       // Architecture-rule violations always render red and a touch thicker.
-      const eType = isCallEdge ? 'call' : isExportEdge ? 'export' : 'import';
+      const eType: EdgeColorKey = isCallEdge ? 'call' : isExportEdge ? 'export' : 'import';
       const edgeHex = isViolation
-        ? '#ef4444'
-        : customEdgeColors?.[eType] || (isCallEdge ? '#fbbf24' : isExportEdge ? '#a78bfa' : '#60a5fa');
+        ? RENDER.edgeViolation
+        : customEdgeColors?.[eType] || EDGE_TYPE_COLORS[eType];
       ctx.strokeStyle = hexToRGBA(edgeHex, opacity);
       ctx.lineWidth = isViolation ? lineWidth + 1 : lineWidth;
       ctx.stroke();
@@ -407,7 +460,8 @@ export default function ForceGraph({
           ax - arrowSize * Math.cos(angle + Math.PI / 6),
           ay - arrowSize * Math.sin(angle + Math.PI / 6),
         );
-        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+        // Arrowhead reads in the edge's own color, a touch brighter than the line.
+        ctx.strokeStyle = hexToRGBA(edgeHex, Math.min(opacity * 1.5, 0.95));
         ctx.lineWidth = lineWidth;
         ctx.stroke();
       }
@@ -433,7 +487,7 @@ export default function ForceGraph({
         ctx.lineTo(t2.x, t2.y);
         ctx.setLineDash([8, 8]);
         ctx.lineDashOffset = -dash;
-        ctx.strokeStyle = hexToRGBA('#22d3ee', opacity);
+        ctx.strokeStyle = hexToRGBA(RENDER.trace.path, opacity);
         ctx.lineWidth = 1.5 + 1.5 * recency;
         ctx.stroke();
         ctx.setLineDash([]);
@@ -466,7 +520,7 @@ export default function ForceGraph({
         const heatRadius = r * (2.2 + heat * 2.4) * pulse;
         const heatGrad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, heatRadius);
         // Hot files trend orange→red; cooler ones stay amber.
-        const heatHex = heat > 0.66 ? '#ef4444' : heat > 0.33 ? '#f97316' : '#fbbf24';
+        const heatHex = heat > 0.66 ? RENDER.heat.hot : heat > 0.33 ? RENDER.heat.warm : RENDER.heat.cool;
         heatGrad.addColorStop(0, hexToRGBA(heatHex, 0.5 * heat * alpha));
         heatGrad.addColorStop(0.5, hexToRGBA(heatHex, 0.22 * heat * alpha));
         heatGrad.addColorStop(1, hexToRGBA(heatHex, 0));
@@ -485,9 +539,9 @@ export default function ForceGraph({
         const isModified = traceModifiedIds?.has(node.id);
         const isRead = traceReadIds?.has(node.id);
         const isDeleted = traceDeletedIds?.has(node.id);
-        if (isDeleted) traceColor = '#ef4444';
-        else if (isModified) traceColor = '#f59e0b';
-        else if (isRead) traceColor = '#3b82f6';
+        if (isDeleted) traceColor = RENDER.heat.hot;
+        else if (isModified) traceColor = RENDER.heat.warm;
+        else if (isRead) traceColor = COLORS.accent;
         const touched = isActive || isModified || isRead || isDeleted;
         // Dim everything the agent hasn't touched yet so the route stands out.
         if (!touched && node.id !== selectedNodeId) alpha *= 0.18;
@@ -497,28 +551,32 @@ export default function ForceGraph({
           const ringR = r * 2 + 6 + 4 * Math.sin(pulseRef.current * 1.6);
           ctx.beginPath();
           ctx.arc(node.x, node.y, ringR, 0, Math.PI * 2);
-          ctx.strokeStyle = hexToRGBA('#22d3ee', pulse);
+          ctx.strokeStyle = hexToRGBA(RENDER.trace.active, pulse);
           ctx.lineWidth = 2.5;
           ctx.stroke();
         }
       }
 
-      // Glow gradient
+      const isSelected = node.id === selectedNodeId;
+      const isHovered = node.id === hovered;
+
+      // Glow gradient — tighter falloff (~0.45 mid) for a crisper read.
+      // Hover/selected push a wider, brighter halo so the focus is unmistakable.
       const glowColor = traceColor ?? color;
-      const glowRadius = node.id === hovered ? r * 2.5 : node.id === selectedNodeId ? r * 3 : r * 1.8;
+      const glowRadius = isSelected ? r * 3.2 : isHovered ? r * 2.8 : r * 1.8;
       const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
 
-      if (node.id === selectedNodeId) {
-        gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+      if (isSelected) {
+        gradient.addColorStop(0, hexToRGBA(COLORS.selected, alpha));
         gradient.addColorStop(0.3, hexToRGBA(color, 0.8 * alpha));
         gradient.addColorStop(1, hexToRGBA(color, 0));
-      } else if (node.id === hovered) {
-        gradient.addColorStop(0, `rgba(255, 255, 255, ${0.9 * alpha})`);
-        gradient.addColorStop(0.4, hexToRGBA(color, 0.7 * alpha));
+      } else if (isHovered) {
+        gradient.addColorStop(0, hexToRGBA(COLORS.selected, 0.9 * alpha));
+        gradient.addColorStop(0.45, hexToRGBA(color, 0.7 * alpha));
         gradient.addColorStop(1, hexToRGBA(color, 0));
       } else {
         gradient.addColorStop(0, hexToRGBA(glowColor, alpha));
-        gradient.addColorStop(0.6, hexToRGBA(glowColor, 0.3 * alpha));
+        gradient.addColorStop(0.45, hexToRGBA(glowColor, 0.32 * alpha));
         gradient.addColorStop(1, hexToRGBA(glowColor, 0));
       }
 
@@ -528,14 +586,53 @@ export default function ForceGraph({
       ctx.fill();
 
       // Solid core
+      const coreColor = isSelected
+        ? hexToRGBA(COLORS.selected, alpha)
+        : isHovered
+          ? hexToRGBA(COLORS.selected, 0.9 * alpha)
+          : hexToRGBA(glowColor, alpha);
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = node.id === selectedNodeId
-        ? `rgba(255, 255, 255, ${alpha})`
-        : node.id === hovered
-          ? `rgba(255, 255, 255, ${0.9 * alpha})`
-          : hexToRGBA(glowColor, alpha);
+      ctx.fillStyle = coreColor;
       ctx.fill();
+
+      // Soft spherical highlight (offset up-left) for a 3D pebble feel.
+      // Only for nodes big enough on screen — tiny/distant nodes keep the flat
+      // fill for perf and to avoid muddy sub-pixel gradients.
+      if (r * k > 3 && !isSelected && !isHovered) {
+        const hlR = r * 0.9;
+        const hlx = node.x - r * 0.3;
+        const hly = node.y - r * 0.3;
+        const hlGrad = ctx.createRadialGradient(hlx, hly, 0, hlx, hly, hlR);
+        // RENDER.nodeCoreHighlight is an rgba() string with its own alpha; node
+        // dimming is applied via globalAlpha so it composes correctly.
+        hlGrad.addColorStop(0, RENDER.nodeCoreHighlight);
+        hlGrad.addColorStop(1, hexToRGBA(glowColor, 0));
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = hlGrad;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Hover: thin crisp rim. Selected: crisp 2px accent/white ring further out
+      // so the selection always reads as the single brightest thing on screen.
+      if (isHovered && !isSelected) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = hexToRGBA(COLORS.selected, 0.9 * alpha);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = hexToRGBA(COLORS.accentBright, alpha);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
 
       // Search highlight pulse
       if (searchHighlight && node.id === searchHighlight) {
@@ -543,26 +640,39 @@ export default function ForceGraph({
         const pulseRadius = r * 2 + 6 * Math.sin(pulseRef.current);
         ctx.beginPath();
         ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255, 255, 255, ${pulseAlpha})`;
+        ctx.strokeStyle = hexToRGBA(COLORS.accentBright, pulseAlpha);
         ctx.lineWidth = 2;
         ctx.stroke();
       }
 
       // Labels
-      const showLabel = forceShowLabels || k > 0.7 || node.id === hovered || node.id === selectedNodeId;
+      const showLabel = forceShowLabels || k > 0.7 || isHovered || isSelected;
       if (showLabel && visible) {
-        ctx.font = `11px var(--font-mono), 'JetBrains Mono', monospace`;
-        ctx.fillStyle = `rgba(228, 228, 239, 0.7)`;
+        ctx.font = `11px ${RENDER.fontMono}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillText(node.label, node.x, node.y + r + 4);
+        const lx = node.x;
+        const ly = node.y + r + 4;
+        // Cheap legibility halo: draw the label in the bg color at 1px offsets
+        // first (no shadowBlur — too expensive in the rAF loop), then the label.
+        ctx.fillStyle = RENDER.labelHalo;
+        ctx.fillText(node.label, lx - 1, ly);
+        ctx.fillText(node.label, lx + 1, ly);
+        ctx.fillText(node.label, lx, ly - 1);
+        ctx.fillText(node.label, lx, ly + 1);
+        ctx.fillStyle = RENDER.label;
+        ctx.fillText(node.label, lx, ly);
       }
     }
 
     ctx.restore();
 
+    // Publish the visible region (world coords) for the minimap lens. Throttled
+    // internally to ~120ms so this rAF loop never floods React with updates.
+    emitViewportRef.current();
+
     animFrameRef.current = requestAnimationFrame(drawRef.current);
-  }, [hoveredId, selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes, historyMode, churn, traceMode, traceActiveId, traceReadIds, traceModifiedIds, traceDeletedIds, tracePath]);
+  }, [selectedNodeId, filters, searchHighlight, forceShowLabels, customNodeColors, customEdgeColors, visibleEdgeTypes, historyMode, churn, traceMode, traceActiveId, traceReadIds, traceModifiedIds, traceDeletedIds, tracePath]);
   useEffect(() => { drawRef.current = draw; }, [draw]);
 
   /* ── Hit testing ─────────────────────────────────────── */
@@ -629,6 +739,70 @@ export default function ForceGraph({
         transformRef.current = event.transform;
       });
     sel.call(zoomBehavior);
+
+    /* ── External view-control events (from GraphControls / Minimap) ──── */
+
+    const canvasSize = () => {
+      const dpr = window.devicePixelRatio || 1;
+      return { w: canvas.width / dpr, h: canvas.height / dpr };
+    };
+
+    // Fit-all-nodes transform (bounding-box based) — reused by 'fit' and
+    // emitted once after the initial layout settles.
+    const computeFitTransform = (): d3.ZoomTransform | null => {
+      const ns = nodesRef.current;
+      if (ns.length === 0) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of ns) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y);
+      }
+      const { w, h } = canvasSize();
+      const padding = 80;
+      const gw = maxX - minX;
+      const gh = maxY - minY;
+      const scale = Math.min(
+        Math.max(
+          gw > 0 && gh > 0 ? Math.min((w - padding * 2) / gw, (h - padding * 2) / gh) : 1,
+          0.1,
+        ),
+        10,
+      );
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      return d3.zoomIdentity.translate(w / 2 - cx * scale, h / 2 - cy * scale).scale(scale);
+    };
+
+    const handleZoomEvent = (e: Event) => {
+      const dir = (e as CustomEvent<{ direction?: 'in' | 'out' | 'fit' }>).detail?.direction;
+      if (!dir) return;
+      if (dir === 'fit') {
+        const fit = computeFitTransform();
+        if (fit) sel.transition().duration(400).call(zoomBehavior.transform, fit);
+        return;
+      }
+      const { w, h } = canvasSize();
+      const t = transformRef.current;
+      const newK = Math.min(Math.max(dir === 'in' ? t.k * 1.3 : t.k / 1.3, 0.1), 10);
+      // Keep the view centered on the canvas center while zooming.
+      const cx = w / 2;
+      const cy = h / 2;
+      const tx = cx - (cx - t.x) * (newK / t.k);
+      const ty = cy - (cy - t.y) * (newK / t.k);
+      sel.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(newK));
+    };
+
+    const handlePanToEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ x?: number; y?: number }>).detail;
+      if (!detail || typeof detail.x !== 'number' || typeof detail.y !== 'number') return;
+      const { w, h } = canvasSize();
+      const k = transformRef.current.k;
+      const target = d3.zoomIdentity.translate(w / 2 - detail.x * k, h / 2 - detail.y * k).scale(k);
+      sel.transition().duration(400).call(zoomBehavior.transform, target);
+    };
+
+    window.addEventListener('anomaly:zoom', handleZoomEvent);
+    window.addEventListener('anomaly:panTo', handlePanToEvent);
 
     // All mouse/touch interaction handled manually — no d3.zoom conflict
 
@@ -883,11 +1057,16 @@ export default function ForceGraph({
 
       transformRef.current = d3.zoomIdentity.translate(tx, ty).scale(scale);
       sel.call(zoomBehavior.transform, transformRef.current);
+      // Emit the viewport once after the initial fit so the minimap lens is
+      // correct immediately (bypasses the throttle).
+      emitViewportRef.current(true);
     }, 300);
 
     return () => {
       clearInterval(fitCheck);
       window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('anomaly:zoom', handleZoomEvent);
+      window.removeEventListener('anomaly:panTo', handlePanToEvent);
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);

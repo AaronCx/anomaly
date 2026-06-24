@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Play, Pause, Route, Upload, X, Eye, Pencil, FilePlus2, Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { AgentTrace, TraceAction } from '@/lib/trace/types';
 import { parseTraceJSON, TraceParseError } from '@/lib/trace/parse';
 import type { ReplayState } from '@/lib/trace/replay';
+import { RangeStyles } from './Timeline';
 
 const ACTION_META: Record<TraceAction, { color: string; Icon: typeof Eye; label: string }> = {
   read: { color: '#3b82f6', Icon: Eye, label: 'read' },
@@ -35,7 +37,32 @@ export interface TracePanelProps {
   resolvedCount: number;
   /** Milliseconds each step is shown while playing. */
   stepMs?: number;
+  /** Appended last so the page can reposition the panel. */
+  className?: string;
 }
+
+/** Shared root geometry/material for both loader and player views. */
+const PANEL_ROOT =
+  'panel-range glass animate-fade-in-up absolute bottom-4 left-1/2 z-30 w-[min(620px,92vw)] ' +
+  '-translate-x-1/2 rounded-xl px-4 py-3 transition-shadow duration-200 ease-out ' +
+  'hover:shadow-[var(--shadow-pop)]';
+
+/** Field recipe shared by the URL input + paste textarea. */
+const FIELD =
+  'rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm ' +
+  'text-[var(--color-text)] outline-none transition focus:border-[var(--color-accent)] ' +
+  'focus:ring-2 focus:ring-[var(--color-accent)]/25 placeholder:text-[var(--color-text-faint)]';
+
+/** Primary button recipe (Fetch, Load pasted trace). */
+const PRIMARY =
+  'rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[var(--color-bg)] ' +
+  'transition hover:bg-[var(--color-accent-bright)] active:scale-[0.98] ' +
+  'disabled:opacity-50 disabled:pointer-events-none';
+
+/** Ghost button recipe (Upload JSON). */
+const GHOST =
+  'inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 ' +
+  'text-sm text-[var(--color-text-muted)] transition hover:bg-white/[0.05] hover:text-[var(--color-text)]';
 
 /**
  * Agent-trace overlay control: load a trace (file / paste / URL), then a step
@@ -52,6 +79,7 @@ export function TracePanel({
   onLoadTrace,
   resolvedCount,
   stepMs = 1100,
+  className,
 }: TracePanelProps) {
   const [paste, setPaste] = useState('');
   const [url, setUrl] = useState('');
@@ -114,7 +142,12 @@ export function TracePanel({
   /* ── Loader view (no trace yet) ──────────────────────────── */
   if (!trace || states.length === 0) {
     return (
-      <div className="absolute bottom-4 left-1/2 z-30 w-[min(620px,92vw)] -translate-x-1/2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-lg backdrop-blur">
+      <div className={cn(PANEL_ROOT, className)}>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-xl bg-white/10"
+        />
+
         <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--color-text)]">
           <Route size={14} className="text-[var(--color-accent)]" />
           Agent Trace
@@ -122,11 +155,11 @@ export function TracePanel({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-text)]"
+              className={cn(GHOST, 'shrink-0')}
             >
               <Upload size={14} /> Upload JSON
             </button>
@@ -147,13 +180,14 @@ export function TracePanel({
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void handleUrl(); }}
               placeholder="…or paste a trace URL"
-              className="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
+              aria-label="Trace URL"
+              className={cn(FIELD, 'w-full min-w-0 text-xs sm:w-auto sm:flex-1')}
             />
             <button
               type="button"
               onClick={() => void handleUrl()}
               disabled={loadingUrl || !url.trim()}
-              className="shrink-0 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-text)] disabled:opacity-50"
+              className={cn(PRIMARY, 'shrink-0 px-3 text-xs')}
             >
               {loadingUrl ? 'Loading…' : 'Fetch'}
             </button>
@@ -164,20 +198,30 @@ export function TracePanel({
             onChange={(e) => setPaste(e.target.value)}
             placeholder="…or paste trace JSON here (canonical, Claude Code session, or Forge run log)"
             rows={2}
-            className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]"
+            aria-label="Trace JSON"
+            className={cn(FIELD, 'w-full resize-none font-[var(--font-mono)] text-[11px]')}
           />
           {paste.trim() && (
             <button
               type="button"
               onClick={() => ingest(paste)}
-              className="self-start rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/25"
+              className={cn(PRIMARY, 'self-start px-3 text-xs')}
             >
               Load pasted trace
             </button>
           )}
 
-          {error && <p className="text-[11px] text-red-400">{error}</p>}
+          {error && (
+            <p
+              role="alert"
+              className="rounded-lg border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/10 px-3 py-2 text-[11px] text-[var(--color-danger)]"
+            >
+              {error}
+            </p>
+          )}
         </div>
+
+        <RangeStyles />
       </div>
     );
   }
@@ -186,19 +230,25 @@ export function TracePanel({
   const state = states[Math.min(index, last)];
   const meta = ACTION_META[state.raw.action];
   const StepIcon = meta.Icon;
+  const progress = last > 0 ? (Math.min(index, last) / last) * 100 : 0;
 
   return (
-    <div className="absolute bottom-4 left-1/2 z-30 w-[min(620px,92vw)] -translate-x-1/2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-4 py-3 shadow-lg backdrop-blur">
+    <div className={cn(PANEL_ROOT, className)}>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-xl bg-white/10"
+      />
+
       <div className="mb-2 flex items-center justify-between gap-3">
         <span className="flex items-center gap-2 text-xs font-medium text-[var(--color-text)]">
           <Route size={14} className="text-[var(--color-accent)]" />
           {trace.title || trace.runId || 'Agent Trace'}
-          <span className="text-[var(--color-text-muted)]">
+          <span className="font-[var(--font-mono)] text-[var(--color-text-muted)]">
             {index + 1} / {states.length}
           </span>
         </span>
         <span className="flex items-center gap-2">
-          <span className="font-mono text-[11px] text-[var(--color-text-muted)]" title="steps mapped to a graph node">
+          <span className="font-[var(--font-mono)] text-[11px] text-[var(--color-text-muted)]" title="steps mapped to a graph node">
             {resolvedCount}/{states.length} mapped
           </span>
           <button
@@ -206,7 +256,7 @@ export function TracePanel({
             onClick={() => onLoadTrace(null)}
             title="Clear trace"
             aria-label="Clear trace"
-            className="rounded-lg p-1 text-[var(--color-text-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-text)]"
+            className="inline-flex items-center justify-center rounded-lg p-2 text-[var(--color-text-muted)] transition hover:bg-white/[0.06] hover:text-[var(--color-text)] active:scale-95"
           >
             <X size={14} />
           </button>
@@ -219,9 +269,18 @@ export function TracePanel({
           onClick={onTogglePlay}
           title={playing ? 'Pause' : 'Play'}
           aria-label={playing ? 'Pause' : 'Play'}
-          className="shrink-0 rounded-lg p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-white/5 hover:text-[var(--color-text)]"
+          className={cn(
+            'inline-flex shrink-0 items-center justify-center rounded-lg p-2 transition active:scale-95',
+            playing
+              ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent-bright)]'
+              : 'text-[var(--color-text-muted)] hover:bg-white/[0.06] hover:text-[var(--color-text)]',
+          )}
         >
-          {playing ? <Pause size={16} /> : <Play size={16} />}
+          {playing ? (
+            <Pause size={16} className="animate-pulse-soft" />
+          ) : (
+            <Play size={16} />
+          )}
         </button>
 
         <input
@@ -232,19 +291,24 @@ export function TracePanel({
           value={Math.min(index, last)}
           aria-label="Trace step scrubber"
           onChange={(e) => onIndexChange(Number(e.target.value))}
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[var(--color-border)] accent-[var(--color-accent)]"
+          style={{ '--range-progress': `${progress}%` } as React.CSSProperties}
+          className="panel-range__input w-full"
         />
       </div>
 
       <div className="mt-2 flex items-center gap-2 text-[11px]">
         <span
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
-          style={{ color: meta.color, backgroundColor: `${meta.color}1f` }}
+          className="flex items-center gap-1 rounded-full px-2.5 py-1 font-medium"
+          style={{
+            color: meta.color,
+            backgroundColor: `${meta.color}22`,
+            boxShadow: `inset 0 0 0 1px ${meta.color}33`,
+          }}
         >
           <StepIcon size={12} /> {meta.label}
         </span>
         <span
-          className="truncate font-mono text-[var(--color-text)]"
+          className="truncate font-[var(--font-mono)] text-[var(--color-text)]"
           title={state.raw.file}
         >
           {fileLabel(state.raw.file)}
@@ -260,6 +324,8 @@ export function TracePanel({
           </span>
         )}
       </div>
+
+      <RangeStyles />
     </div>
   );
 }

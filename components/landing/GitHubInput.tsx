@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Github, ArrowRight, Loader2 } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { GithubIcon } from '@/components/icons/GithubIcon';
 import { parseRepoUrl, cn } from '@/lib/utils';
 
 interface GitHubInputProps {
@@ -37,7 +38,7 @@ export default function GitHubInput({ className }: GitHubInputProps) {
       )}
     >
       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--color-surface-2)] transition-colors duration-200">
-        <Github className="h-6 w-6 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
+        <GithubIcon className="h-6 w-6 text-[var(--color-text-muted)] transition-colors group-hover:text-[var(--color-text)]" />
       </div>
 
       <div className="text-center">

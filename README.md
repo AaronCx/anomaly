@@ -6,6 +6,8 @@ Drop a folder or paste a GitHub URL. Anomaly parses the entire codebase in your 
 
 **Zero backend. Zero config. Zero API keys required.**
 
+![Force graph of the LastGate monorepo — 259 files clustered by directory, colored by role, sized by complexity](.github/assets/force-graph-lastgate.png)
+
 ## Try It Live
 
 **[anomaly-eta.vercel.app](https://anomaly-eta.vercel.app)**

@@ -1,5 +1,7 @@
 # Anomaly — Browser-Based Codebase Graph Visualizer
 
+[![CI](https://github.com/AaronCx/anomaly/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AaronCx/anomaly/actions/workflows/ci.yml)
+
 > See how any codebase connects.
 
 Drop a folder or paste a GitHub URL. Anomaly parses the entire codebase in your browser and renders an interactive, neural-style force graph showing every file, every import, every function — instantly.
